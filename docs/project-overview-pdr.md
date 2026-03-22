@@ -2,24 +2,27 @@
 
 ## Project Definition
 
-**Name:** TikTok Batch Video Downloader
-**Version:** 1.0.0
-**Status:** Initial Release
-**Last Updated:** 2026-03-21
+**Name:** TikTok & Facebook Batch Video Downloader
+**Version:** 1.1.0
+**Status:** Stable (Multi-platform support, Facebook integration complete)
+**Last Updated:** 2026-03-22
 
 ## Executive Summary
 
-A lightweight Python CLI tool for batch-downloading TikTok videos without watermarks. Supports single URLs, batch file processing, and user profile scraping with concurrent downloads and automatic duplicate detection.
+Dual-interface Python application for batch-downloading TikTok and Facebook videos without watermarks. Includes PySide6 desktop GUI with tabbed interface and command-line tool with Rich progress UI. Features concurrent downloads, profile/page scraping, channel browsing, and automatic duplicate detection across both platforms.
 
 ## Core Features
 
-1. **Single & Batch Downloads** — Download individual videos or process multiple URLs from a file
-2. **User Profile Scraping** — Download all videos from a TikTok user profile
-3. **Concurrent Processing** — Parallel downloads with configurable worker threads (default: 3)
-4. **Skip Duplicates** — Automatically detects and skips previously downloaded videos
-5. **Rate Limiting** — Configurable inter-request delay to respect TikTok's rate limits
-6. **Clean Output** — Videos saved without watermarks; filenames include video ID and title
-7. **Rich CLI UI** — Real-time progress bar with color-coded status messages
+1. **Dual Interface** — PySide6 desktop GUI (tabbed interface) or CLI with Rich UI
+2. **Multi-platform Support** — TikTok and Facebook videos in single batch
+3. **Download Modes** — Single URLs, batch files, TikTok user profiles, Facebook pages
+4. **Channel/Page Browsing** — Discover and browse TikTok channels and Facebook pages via GUI
+5. **Concurrent Processing** — ThreadPoolExecutor with configurable workers (default: 3)
+6. **Duplicate Detection** — Filesystem scan prevents re-downloading; cross-platform awareness
+7. **Rate Limiting** — Configurable inter-request delay to respect platform rate limits
+8. **Watermark Removal** — yt-dlp extraction for clean, high-quality output
+9. **Real-time Progress** — GUI table updates and CLI progress bar with percentages
+10. **Settings Persistence** — Configuration saved to ~/.tiktokder/config.json (output dir, workers, delay)
 
 ## Technical Stack
 
@@ -27,44 +30,63 @@ A lightweight Python CLI tool for batch-downloading TikTok videos without waterm
 |-----------|------------|
 | **Language** | Python 3.10+ |
 | **Video Engine** | yt-dlp 2024.0.0+ |
-| **UI Framework** | Rich 13.0.0+ |
+| **Desktop UI** | PySide6 6.6.0+ |
+| **CLI UI** | Rich 13.0.0+ |
 | **Testing** | pytest 7.0.0+ |
+| **Packaging** | PyInstaller 6.0.0+ |
 | **Concurrency** | ThreadPoolExecutor (Python stdlib) |
 
 ## Architecture Overview
 
+### Entry Points
+- **`app.py`** — PySide6 desktop GUI entry point
+- **`main.py`** — CLI entry point with argparse handler
+
+### Core Modules
+- **`url_parser.py`** — URL validation, channel detection, batch file parsing
+- **`downloader.py`** — yt-dlp wrapper, concurrent execution, progress hooks
+- **`channel_fetcher.py`** — TikTok channel metadata and video list retrieval
+- **`download_engine.py`** — Unified download orchestration for GUI and CLI
+- **`config.py`** — JSON-based settings persistence (~/.tiktokder/config.json)
+
+### GUI Package (`gui/`)
+- **`main_window.py`** — Main application window with tab interface
+- **`url_input_panel.py`** — URL input and single-download controls
+- **`download_table.py`** — Download queue and progress display
+- **`channel_browser.py`** — Channel discovery and browsing interface
+- **`settings_panel.py`** — Application configuration (output dir, workers, delay)
+
+### Data Flow (GUI)
 ```
-main.py (CLI entry point)
-├── parse_args() → Argparse CLI handler
-├── validate inputs → Exactly one input mode
-├── build URL list
-│   ├── Single URL: validate_tiktok_url()
-│   ├── Batch file: read_batch_file() → deduplicate
-│   └── User profile: build_user_url()
-├── skip already-downloaded → get_downloaded_ids()
-└── download_batch() → concurrent ThreadPoolExecutor
-    └── download_video() → yt-dlp wrapper
+app.py → MainWindow → TabWidget
+├── url_input_panel → download_engine → downloader → yt-dlp
+├── channel_browser → channel_fetcher → TikTok data
+└── settings_panel → config.py (persistence)
 ```
 
-**Key Modules:**
-- `url_parser.py` — URL validation, extraction, batch file parsing
-- `downloader.py` — yt-dlp wrapper, concurrent execution, progress tracking
-- `main.py` — CLI orchestration
+### Data Flow (CLI)
+```
+main.py → parse_args() → download_batch() → concurrent ThreadPoolExecutor
+└── download_video() → yt-dlp wrapper (with optional progress_hook)
+```
 
 ## Functional Requirements
 
 | Req ID | Requirement | Status |
 |--------|-------------|--------|
-| FR-1 | Accept single TikTok video URL | ✓ Implemented |
-| FR-2 | Accept batch file with URLs (one per line) | ✓ Implemented |
+| FR-1 | Accept single TikTok or Facebook video URL (GUI & CLI) | ✓ Implemented |
+| FR-2 | Accept batch file with mixed-platform URLs | ✓ Implemented |
 | FR-3 | Accept TikTok username for profile scraping | ✓ Implemented |
-| FR-4 | Skip empty lines and comments in batch files | ✓ Implemented |
-| FR-5 | Remove duplicate URLs in batch | ✓ Implemented |
-| FR-6 | Validate TikTok URLs before processing | ✓ Implemented |
-| FR-7 | Extract clean video without watermark | ✓ Implemented |
-| FR-8 | Detect and skip already-downloaded videos | ✓ Implemented |
-| FR-9 | Display real-time download progress | ✓ Implemented |
-| FR-10 | Configure output directory | ✓ Implemented |
+| FR-4 | Accept Facebook page URL for scraping | ✓ Implemented |
+| FR-5 | Skip empty lines and comments in batch files | ✓ Implemented |
+| FR-6 | Remove duplicates and validate mixed URLs | ✓ Implemented |
+| FR-7 | Detect platform (TikTok vs. Facebook) automatically | ✓ Implemented |
+| FR-8 | Extract clean videos without watermarks | ✓ Implemented |
+| FR-9 | Detect and skip already-downloaded videos | ✓ Implemented |
+| FR-10 | Display real-time progress (GUI table + CLI bar) | ✓ Implemented |
+| FR-11 | Browse TikTok channels and Facebook pages (GUI) | ✓ Implemented |
+| FR-12 | Configure output dir, workers, delay | ✓ Implemented |
+| FR-13 | Persist settings to ~/.tiktokder/config.json | ✓ Implemented |
 
 ## Non-Functional Requirements
 
@@ -76,46 +98,57 @@ main.py (CLI entry point)
 | NFR-4 | Keyboard interrupt handling (SIGINT) | ✓ Implemented |
 | NFR-5 | Handle batch files up to 10,000+ URLs | ✓ Scalable |
 | NFR-6 | No API keys or authentication required | ✓ Implemented |
-| NFR-7 | Unit test coverage for all modules | ✓ 67 tests |
+| NFR-7 | Unit test coverage for all modules | ✓ 104 tests |
+| NFR-8 | Save/restore GUI window position and size | ✓ Implemented |
+| NFR-9 | Responsive GUI with non-blocking downloads | ✓ Implemented |
+| NFR-10 | Cross-platform support (Windows, macOS, Linux) | ✓ Supported |
 
 ## CLI Interface
 
 ```
-usage: python main.py <url> [options]
+usage: python main.py <url|--batch FILE|--user USERNAME|--facebook-page URL> [options]
 
-Positional arguments:
-  url                   Single TikTok video URL
+Input modes (choose one):
+  url                        Single TikTok or Facebook video URL
+  --batch FILE               Text file with URLs (mixed platforms, one per line)
+  --user USERNAME            TikTok username to scrape (with or without @)
+  --facebook-page PAGE_URL   Facebook page URL to scrape
 
-Optional arguments:
-  --batch FILE         Path to text file with URLs (one per line)
-  --user USERNAME      TikTok username to scrape (with or without @)
-  --output DIR         Output directory (default: ./downloads)
-  --workers N          Concurrent downloads (default: 3)
-  --delay N            Delay between downloads in seconds (default: 1.0)
+Options:
+  --output DIR              Output directory (default: ./downloads)
+  --workers N               Concurrent downloads (default: 3)
+  --delay N                 Delay between requests in seconds (default: 1.0)
 ```
 
 **Input Modes (mutually exclusive):**
-- Direct URL as positional argument
-- `--batch FILE` for bulk processing
-- `--user USERNAME` for profile scraping
+- Direct URL (auto-detects TikTok or Facebook)
+- `--batch FILE` for bulk mixed-platform processing
+- `--user USERNAME` for TikTok profile scraping
+- `--facebook-page URL` for Facebook page scraping
 
 ## Success Criteria
 
-- [x] All 67 unit tests pass
-- [x] Single video downloads without watermark
-- [x] Batch file processing with duplicate detection
-- [x] User profile scraping capability
-- [x] Concurrent downloads with progress UI
-- [x] Automatic skip of previously downloaded videos
+- [x] All 104+ unit tests pass
+- [x] Single video downloads without watermark (TikTok & Facebook, GUI & CLI)
+- [x] Batch file processing with mixed-platform support
+- [x] TikTok profile and Facebook page scraping capability
+- [x] Concurrent downloads with real-time progress (GUI & CLI)
+- [x] Automatic skip of previously downloaded videos (cross-platform)
+- [x] Platform detection (TikTok vs. Facebook) automatic
 - [x] CLI accepts all required arguments with validation
-- [x] Error messages are user-friendly and actionable
+- [x] Desktop GUI with 3 tabs: URL Input, Channel/Page Browser, Settings
+- [x] Real-time download table with status, progress %, file size
+- [x] Channel/page discovery and batch selection via GUI
+- [x] Settings persisted to ~/.tiktokder/config.json
+- [x] User-friendly error dialogs and CLI messages
 
 ## Known Limitations
 
-1. **Profile scraping:** Depends on yt-dlp's ability to extract profile URLs; may be rate-limited
-2. **Watermark removal:** Uses yt-dlp best-effort extraction; quality depends on TikTok's current video format
-3. **Persistence:** No database; duplicate detection based solely on filesystem scan
-4. **Error recovery:** Failed downloads are logged but not retried
+1. **Platform scraping:** TikTok and Facebook may rate-limit; use `--delay` to mitigate
+2. **Watermark removal:** yt-dlp best-effort; quality depends on platform video format
+3. **Persistence:** No database; duplicate detection filesystem-based only
+4. **Error recovery:** Failed downloads logged but not auto-retried
+5. **Facebook Playwright:** Requires headless browser; may be rate-limited by Facebook
 
 ## Dependencies & Constraints
 
@@ -128,18 +161,24 @@ Optional arguments:
 ## Future Enhancements
 
 - Resume interrupted batch downloads
-- Video metadata export (duration, likes, comments)
-- Filter videos by date range or engagement metrics
-- Database for persistent download history
+- Video metadata export (duration, likes, views, upload date)
+- Filter videos by date range, engagement, or caption keywords
+- Database for persistent download history and statistics
 - Scheduled/recurring batch downloads
 - Webhook notifications on completion
+- Standalone executable (PyInstaller packaging)
+- Dark/light theme support
+- Advanced search and filtering in channel/page browser
+- Download queue save/restore on app restart
+- Support for additional platforms (Instagram, YouTube, Twitter)
 
 ## Testing & Quality Assurance
 
-- **Unit Tests:** 67 tests covering all modules
-- **Test Coverage:** URL parsing, batch processing, download logic, error handling
+- **Unit Tests:** 104 tests covering all modules (67 original + 37 new for GUI/config/engine)
+- **Test Files:** 4 test modules (test_tiktokder.py, test_config.py, test_download_engine.py, test_channel_fetcher.py)
+- **Test Coverage:** URL parsing, batch processing, download logic, channel detection, config persistence, error handling
 - **CI/CD Ready:** pytest integration for automated testing
-- **Error Scenarios:** Network failures, invalid URLs, missing files, file permissions
+- **Error Scenarios:** Network failures, invalid URLs, missing files, file permissions, invalid config
 
 ## Maintenance & Support
 
