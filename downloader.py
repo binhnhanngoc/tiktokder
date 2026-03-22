@@ -3,10 +3,12 @@
 import os
 import re
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 import yt_dlp
+from yt_dlp.networking.impersonate import ImpersonateTarget
 from url_parser import extract_video_id
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
@@ -25,15 +27,26 @@ class DownloadResult:
     skipped: bool = False
 
 
-def get_ydl_opts(output_dir: str) -> dict:
-    """Return yt-dlp options dict for TikTok downloads."""
-    return {
+def get_ydl_opts(
+    output_dir: str,
+    cookie_browser: str | None = None,
+) -> dict:
+    """Return yt-dlp options dict optimized for TikTok downloads."""
+    opts = {
         "outtmpl": os.path.join(output_dir, "%(id)s_%(title).50s.%(ext)s"),
-        "format": "best",
+        "format": "b",  # Single best stream (avoids watermark + merge failures)
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
+        "buffersize": 65536,  # 64KB buffer — reduces syscall overhead
+        "throttled_rate": 10240,  # Re-extract URL only if below 10KB/s (TikTok CDN baseline is ~50KB/s)
+        "retries": 5,
+        "socket_timeout": 30,  # Fail fast on stalled connections
+        "impersonate": ImpersonateTarget("chrome", "136"),  # Bypass TLS fingerprint detection
     }
+    if cookie_browser:
+        opts["cookiesfrombrowser"] = (cookie_browser,)
+    return opts
 
 
 def get_downloaded_ids(output_dir: str) -> set[str]:
@@ -50,9 +63,16 @@ def get_downloaded_ids(output_dir: str) -> set[str]:
     return ids
 
 
-def download_video(url: str, output_dir: str) -> DownloadResult:
-    """Download a single TikTok video."""
-    opts = get_ydl_opts(output_dir)
+def download_video(
+    url: str,
+    output_dir: str,
+    progress_hook: Callable | None = None,
+    cookie_browser: str | None = None,
+) -> DownloadResult:
+    """Download a single TikTok video. Optional progress_hook receives yt-dlp progress dicts."""
+    opts = get_ydl_opts(output_dir, cookie_browser=cookie_browser)
+    if progress_hook:
+        opts["progress_hooks"] = [progress_hook]
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)

@@ -1,8 +1,10 @@
-"""TikTok URL parsing and validation utilities."""
+"""URL parsing and validation utilities for TikTok and Facebook."""
 
 import re
 from pathlib import Path
 
+
+# --- TikTok patterns ---
 
 # Matches TikTok video URLs (regular and short links)
 TIKTOK_URL_PATTERN = re.compile(
@@ -11,10 +13,73 @@ TIKTOK_URL_PATTERN = re.compile(
 
 VIDEO_ID_PATTERN = re.compile(r"/video/(\d+)")
 
+# Matches TikTok channel/profile URLs: tiktok.com/@username (no /video/ suffix)
+CHANNEL_URL_PATTERN = re.compile(
+    r"https?://(?:www\.)?tiktok\.com/@[\w.]+/?$"
+)
+
+# --- Facebook patterns ---
+
+# Matches Facebook video/content URLs (watch, videos, reel, posts, story, short links)
+# Also matches profile.php?id= with query parameters
+FACEBOOK_URL_PATTERN = re.compile(
+    r"https?://(?:"
+    r"(?:www\.|m\.|web\.)?(?:facebook\.com|fb\.com)"
+    r"(?:/(?:profile\.php|[\w.]+))?(?:[?&][\w=&%.+-]*)?"
+    r"(?:/(?:videos?|watch|reel|posts|story)/?\S*)?"
+    r"|fb\.watch/[\w./?=&-]+"
+    r")/?$",
+    re.IGNORECASE,
+)
+
+# Matches Facebook page/profile URLs (no video/watch/reel path suffix)
+# Includes profile.php?id= format and vanity URLs
+FACEBOOK_PAGE_PATTERN = re.compile(
+    r"https?://(?:www\.|m\.|web\.)?facebook\.com/"
+    r"(?:profile\.php\?id=\d+(?:&[\w=&%.+-]*)?|[\w.]+/?)"
+    r"$",
+    re.IGNORECASE,
+)
+
 
 def validate_tiktok_url(url: str) -> bool:
     """Check if URL is a valid TikTok video or profile URL."""
     return bool(TIKTOK_URL_PATTERN.match(url.strip()))
+
+
+def validate_facebook_url(url: str) -> bool:
+    """Check if URL is a valid Facebook video or page URL."""
+    return bool(FACEBOOK_URL_PATTERN.match(url.strip()))
+
+
+def validate_url(url: str) -> bool:
+    """Check if URL is a valid TikTok or Facebook URL."""
+    return validate_tiktok_url(url) or validate_facebook_url(url)
+
+
+def is_channel_url(url: str) -> bool:
+    """Check if URL is a TikTok channel/profile URL (not a video URL)."""
+    return bool(CHANNEL_URL_PATTERN.match(url.strip()))
+
+
+def is_facebook_page_url(url: str) -> bool:
+    """Check if URL is a Facebook page/profile URL (no video path)."""
+    return bool(FACEBOOK_PAGE_PATTERN.match(url.strip()))
+
+
+def is_page_or_channel_url(url: str) -> bool:
+    """Check if URL is a TikTok channel or Facebook page URL."""
+    return is_channel_url(url) or is_facebook_page_url(url)
+
+
+def detect_platform(url: str) -> str | None:
+    """Detect platform from URL. Returns 'tiktok', 'facebook', or None."""
+    url = url.strip()
+    if TIKTOK_URL_PATTERN.match(url) or CHANNEL_URL_PATTERN.match(url):
+        return "tiktok"
+    if FACEBOOK_URL_PATTERN.match(url) or FACEBOOK_PAGE_PATTERN.match(url):
+        return "facebook"
+    return None
 
 
 def extract_video_id(url: str) -> str | None:
