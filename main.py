@@ -65,7 +65,8 @@ def main() -> None:
         urls = [profile_url]
         console.print(f"[cyan]Scraping user profile: {profile_url}[/cyan]")
     else:
-        # --facebook-page
+        # --facebook-page: individual video URLs work via yt-dlp without Playwright,
+        # but page scraping (listing all videos) requires it.
         if not validate_facebook_url(args.facebook_page):
             console.print(f"[red]Error: Invalid Facebook URL: {args.facebook_page}[/red]")
             sys.exit(1)

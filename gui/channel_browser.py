@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from channel_fetcher import ChannelFetcher, VideoInfo
-from facebook_fetcher import FacebookFetcher
+from facebook_fetcher import FacebookFetcher, PLAYWRIGHT_AVAILABLE
 from url_parser import detect_platform
 
 
@@ -91,6 +91,13 @@ class ChannelBrowser(QWidget):
         # Use FacebookFetcher for Facebook URLs, ChannelFetcher for TikTok
         platform = detect_platform(url)
         if platform == "facebook":
+            if not PLAYWRIGHT_AVAILABLE:
+                self.status_label.setText(
+                    "Error: Facebook scraping requires Playwright. "
+                    "Install: pip install playwright && playwright install chromium"
+                )
+                self.browse_btn.setEnabled(True)
+                return
             self.status_label.setText("Fetching Facebook videos (browser scraping)...")
             self._fetcher = FacebookFetcher(url, parent=self)
         else:

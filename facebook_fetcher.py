@@ -3,11 +3,19 @@
 yt-dlp cannot list videos from Facebook profiles — only download individual videos.
 This module uses Playwright to scrape reel/video links from a Facebook profile page,
 then emits them through the same VideoInfo signal interface as ChannelFetcher.
+
+Playwright is optional — when missing, FacebookFetcher emits an error signal instead.
 """
 
 import re
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+try:
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    PlaywrightTimeout = Exception  # fallback so except clause doesn't raise NameError
+
 from PySide6.QtCore import QThread, Signal
 
 from channel_fetcher import VideoInfo
@@ -39,6 +47,14 @@ class FacebookFetcher(QThread):
 
     def run(self) -> None:
         """Launch headless browser, navigate to profile, scrape video links."""
+        if not PLAYWRIGHT_AVAILABLE:
+            self.error.emit(
+                "Facebook page scraping requires Playwright. "
+                "Install with: pip install playwright && playwright install chromium"
+            )
+            self.finished_fetch.emit(0)
+            return
+
         count = 0
         seen_urls: set[str] = set()
 
