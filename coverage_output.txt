@@ -1,0 +1,68 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.12, pytest-9.0.2, pluggy-1.5.0
+rootdir: D:\Projects\tiktokder
+plugins: anyio-4.10.0, cov-7.0.0
+collected 131 items
+
+test_tiktokder.py ...................................................... [ 41%]
+................................................                         [ 77%]
+test_channel_fetcher.py .........                                        [ 84%]
+test_config.py ...........                                               [ 93%]
+test_download_engine.py .........C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\pyscript': No source for code: 'D:\Projects\tiktokder\pyscript'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\__init__.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\__init__.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\feature.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\feature.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\__init__.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\__init__.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\errorhandler.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\errorhandler.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\importhandler.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\importhandler.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\layout.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\layout.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\lib\__init__.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\lib\__init__.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\lib\enum_sig.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\lib\enum_sig.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\lib\pyi_generator.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\lib\pyi_generator.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\lib\tool.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\lib\tool.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\loader.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\loader.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\mapping.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\mapping.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\shibokensupport\signature\parser.py': No source for code: 'D:\Projects\tiktokder\shibokensupport\signature\parser.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+C:\DevTools\anaconda3\Lib\site-packages\coverage\report_core.py:113: CoverageWarning: Couldn't parse 'D:\Projects\tiktokder\signature_bootstrap.py': No source for code: 'D:\Projects\tiktokder\signature_bootstrap.py'. (couldnt-parse); see https://coverage.readthedocs.io/en/7.13.5/messages.html#warning-couldnt-parse
+  coverage._warn(msg, slug="couldnt-parse")
+                                        [100%]
+
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.13.12-final-0 _______________
+
+Name                      Stmts   Miss  Cover   Missing
+-------------------------------------------------------
+app.py                       20     20     0%   3-37
+channel_fetcher.py           51      1    98%   66
+config.py                    41      0   100%
+download_engine.py          110     32    71%   29-36, 44-45, 87, 102-112, 116, 123-124, 136-139, 145-147, 153
+downloader.py                76     40    47%   48, 73-86, 97-140
+gui\__init__.py               0      0   100%
+gui\channel_browser.py      106    106     0%   3-166
+gui\download_table.py       148    148     0%   3-240
+gui\main_window.py           92     92     0%   3-166
+gui\settings_panel.py        58     58     0%   3-96
+gui\url_input_panel.py       40     40     0%   3-68
+main.py                      63     30    52%   53-86, 90-94
+test_channel_fetcher.py     118      0   100%
+test_config.py               85      0   100%
+test_download_engine.py      74      0   100%
+test_tiktokder.py           454      1    99%   741
+url_parser.py                48      1    98%   64
+-------------------------------------------------------
+TOTAL                      1584    569    64%
+Coverage HTML written to dir htmlcov
+============================= 131 passed in 1.33s =============================

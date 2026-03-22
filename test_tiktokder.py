@@ -20,9 +20,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from url_parser import (
     validate_tiktok_url,
+    validate_facebook_url,
+    validate_url,
+    is_facebook_page_url,
+    detect_platform,
     extract_video_id,
     read_batch_file,
     build_user_url,
+    is_channel_url,
 )
 from downloader import (
     get_ydl_opts,
@@ -105,6 +110,142 @@ class TestValidateTikTokUrl:
         """Test URL with invalid username characters."""
         url = "https://www.tiktok.com/@user!name/video/1234567890123456789"
         assert validate_tiktok_url(url) is False
+
+
+class TestIsChannelUrl:
+    """Test channel/profile URL detection."""
+
+    def test_channel_url_basic(self):
+        assert is_channel_url("https://www.tiktok.com/@username") is True
+
+    def test_channel_url_with_trailing_slash(self):
+        assert is_channel_url("https://www.tiktok.com/@username/") is True
+
+    def test_channel_url_without_www(self):
+        assert is_channel_url("https://tiktok.com/@user.name") is True
+
+    def test_channel_url_with_dots_underscores(self):
+        assert is_channel_url("https://www.tiktok.com/@user.name_123") is True
+
+    def test_video_url_is_not_channel(self):
+        assert is_channel_url("https://www.tiktok.com/@user/video/123456789") is False
+
+    def test_short_url_is_not_channel(self):
+        assert is_channel_url("https://vm.tiktok.com/ZMRvEabc1/") is False
+
+    def test_empty_string(self):
+        assert is_channel_url("") is False
+
+    def test_non_tiktok_url(self):
+        assert is_channel_url("https://www.youtube.com/@user") is False
+
+
+class TestValidateFacebookUrl:
+    """Test Facebook URL validation."""
+
+    def test_valid_facebook_video_url(self):
+        url = "https://www.facebook.com/user/videos/1234567890"
+        assert validate_facebook_url(url) is True
+
+    def test_valid_facebook_watch_url(self):
+        url = "https://www.facebook.com/watch/?v=1234567890"
+        assert validate_facebook_url(url) is True
+
+    def test_valid_facebook_reel_url(self):
+        url = "https://www.facebook.com/reel/1234567890"
+        assert validate_facebook_url(url) is True
+
+    def test_valid_fb_watch_short_link(self):
+        url = "https://fb.watch/abc123/"
+        assert validate_facebook_url(url) is True
+
+    def test_valid_mobile_facebook_url(self):
+        url = "https://m.facebook.com/user/videos/1234567890"
+        assert validate_facebook_url(url) is True
+
+    def test_valid_fb_com_short_url(self):
+        url = "https://fb.com/user/videos/123"
+        assert validate_facebook_url(url) is True
+
+    def test_invalid_youtube_url(self):
+        url = "https://www.youtube.com/watch?v=abc"
+        assert validate_facebook_url(url) is False
+
+    def test_invalid_empty_string(self):
+        assert validate_facebook_url("") is False
+
+    def test_invalid_tiktok_url(self):
+        url = "https://www.tiktok.com/@user/video/123"
+        assert validate_facebook_url(url) is False
+
+
+class TestIsFacebookPageUrl:
+    """Test Facebook page URL detection."""
+
+    def test_facebook_page_url(self):
+        assert is_facebook_page_url("https://www.facebook.com/pagename") is True
+
+    def test_facebook_page_url_trailing_slash(self):
+        assert is_facebook_page_url("https://www.facebook.com/pagename/") is True
+
+    def test_facebook_page_url_with_dots(self):
+        assert is_facebook_page_url("https://www.facebook.com/page.name") is True
+
+    def test_facebook_video_url_not_page(self):
+        assert is_facebook_page_url("https://www.facebook.com/user/videos/123") is False
+
+    def test_non_facebook_url(self):
+        assert is_facebook_page_url("https://www.tiktok.com/@user") is False
+
+    def test_empty_string(self):
+        assert is_facebook_page_url("") is False
+
+
+class TestDetectPlatform:
+    """Test platform detection."""
+
+    def test_detect_tiktok_video(self):
+        url = "https://www.tiktok.com/@user/video/1234567890"
+        assert detect_platform(url) == "tiktok"
+
+    def test_detect_tiktok_channel(self):
+        url = "https://www.tiktok.com/@username"
+        assert detect_platform(url) == "tiktok"
+
+    def test_detect_facebook_video(self):
+        url = "https://www.facebook.com/user/videos/123"
+        assert detect_platform(url) == "facebook"
+
+    def test_detect_facebook_page(self):
+        url = "https://www.facebook.com/pagename"
+        assert detect_platform(url) == "facebook"
+
+    def test_detect_fb_watch(self):
+        url = "https://fb.watch/abc123/"
+        assert detect_platform(url) == "facebook"
+
+    def test_detect_unknown(self):
+        url = "https://www.youtube.com/watch?v=abc"
+        assert detect_platform(url) is None
+
+    def test_detect_empty(self):
+        assert detect_platform("") is None
+
+
+class TestValidateUrl:
+    """Test unified URL validation."""
+
+    def test_tiktok_url_valid(self):
+        assert validate_url("https://www.tiktok.com/@user/video/123456789") is True
+
+    def test_facebook_url_valid(self):
+        assert validate_url("https://www.facebook.com/user/videos/123") is True
+
+    def test_youtube_url_invalid(self):
+        assert validate_url("https://www.youtube.com/watch?v=abc") is False
+
+    def test_empty_string(self):
+        assert validate_url("") is False
 
 
 class TestExtractVideoId:
@@ -320,10 +461,10 @@ class TestGetYdlOpts:
         assert "outtmpl" in opts
         assert "/path/to/output" in opts["outtmpl"]
 
-    def test_ydl_opts_format_best(self):
-        """Test that format is set to best."""
+    def test_ydl_opts_format_single_stream(self):
+        """Test that format is set to single best stream."""
         opts = get_ydl_opts("/path/to/output")
-        assert opts["format"] == "best"
+        assert opts["format"] == "b"
 
     def test_ydl_opts_quiet_mode(self):
         """Test that quiet mode is enabled."""
@@ -468,6 +609,7 @@ class TestParseArgs:
             assert args.url is None
             assert args.batch is None
             assert args.user is None
+            assert args.facebook_page is None
             assert args.output == "./downloads"
             assert args.workers == 3
             assert args.delay == 1.0
@@ -495,6 +637,14 @@ class TestParseArgs:
             assert args.url is None
             assert args.batch is None
             assert args.user == "username"
+
+    def test_parse_args_facebook_page(self):
+        """Test parsing --facebook-page argument."""
+        with patch('sys.argv', ['main.py', '--facebook-page', 'https://www.facebook.com/somepage']):
+            args = parse_args()
+            assert args.facebook_page == "https://www.facebook.com/somepage"
+            assert args.url is None
+            assert args.user is None
 
     def test_parse_args_custom_output(self):
         """Test parsing custom output directory."""
@@ -548,7 +698,7 @@ class TestMainValidation:
                 assert exc_info.value.code == 1
                 # Verify error message was printed
                 calls = [str(call) for call in mock_print.call_args_list]
-                assert any("Provide a URL, --batch FILE, or --user USERNAME" in str(call) for call in calls)
+                assert any("Provide a URL, --batch FILE, --user USERNAME, or --facebook-page URL" in str(call) for call in calls)
 
     def test_main_multiple_input_modes(self):
         """Test that main exits with error when multiple input modes are provided."""
