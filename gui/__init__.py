@@ -1,0 +1,1 @@
+"""TikTokDer desktop GUI package."""
