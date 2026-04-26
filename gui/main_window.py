@@ -7,19 +7,23 @@ from pathlib import Path
 from PySide6.QtCore import Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QLabel,
     QMainWindow,
+    QMessageBox,
     QTabWidget,
     QWidget,
-    QLabel,
-    QVBoxLayout,
-    QMessageBox,
 )
 
-from config import AppConfig
+from config import (
+    AppConfig,
+    HistoryRecord,
+    load_history_records,
+    save_history_records,
+)
 from download_engine import DownloadEngine
-from gui.url_input_panel import UrlInputPanel
-from gui.download_table import DownloadTableWidget
 from gui.channel_browser import ChannelBrowser
+from gui.download_tab import DownloadTab
+from gui.history_tab import HistoryTab
 from gui.settings_panel import SettingsPanel
 
 
@@ -33,7 +37,7 @@ def _resolve_icon() -> QIcon:
 
 
 class MainWindow(QMainWindow):
-    """TikTokDer main window with Download, Channel, and Settings tabs."""
+    """TikTokDer main window with Download, Channel, History, and Settings tabs."""
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -50,6 +54,10 @@ class MainWindow(QMainWindow):
             max_workers=config.workers,
             delay=config.delay,
             cookie_browser=config.cookie_browser,
+            quality=config.quality_default,
+            write_subs=config.write_subtitles,
+            write_thumb=config.write_thumbnail,
+            history_max_entries=config.history_max_entries,
             parent=self,
         )
 
@@ -58,20 +66,19 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
 
         # --- Download tab ---
-        self.download_tab = QWidget()
-        dl_layout = QVBoxLayout(self.download_tab)
-
-        self.url_input = UrlInputPanel()
-        dl_layout.addWidget(self.url_input)
-
-        self.download_table = DownloadTableWidget()
-        dl_layout.addWidget(self.download_table)
-
+        self.download_tab = DownloadTab()
+        # Back-compat handles for legacy code paths and tests.
+        self.url_input = self.download_tab.url_input
+        self.download_table = self.download_tab.download_table
         self.tabs.addTab(self.download_tab, "Download")
 
         # --- Channel tab ---
         self.channel_browser = ChannelBrowser(cookie_browser=config.cookie_browser)
         self.tabs.addTab(self.channel_browser, "Channel / Page")
+
+        # --- History tab ---
+        self.history_tab = HistoryTab()
+        self.tabs.addTab(self.history_tab, "History")
 
         # --- Settings tab ---
         self.settings_panel = SettingsPanel(config)
@@ -90,6 +97,11 @@ class MainWindow(QMainWindow):
         self.url_input.video_url_submitted.connect(self._on_video_url)
         self.url_input.channel_url_submitted.connect(self._on_channel_url)
 
+        # Drag-drop + import/export
+        self.download_tab.urls_dropped.connect(self._on_urls_dropped)
+        self.download_tab.import_requested.connect(self._on_urls_dropped)
+        self.download_tab.export_requested.connect(self._on_export_requested)
+
         # Channel browser -> engine
         self.channel_browser.download_requested.connect(self._on_channel_download)
 
@@ -98,6 +110,7 @@ class MainWindow(QMainWindow):
         self.engine.download_progress.connect(self.download_table.on_download_progress)
         self.engine.download_finished.connect(self._on_download_finished)
         self.engine.all_finished.connect(self._on_all_finished)
+        self.engine.history_changed.connect(self.history_tab.refresh)
 
         # Cancel all button
         self.download_table.cancel_all_btn.clicked.connect(self.engine.cancel_all)
@@ -106,6 +119,10 @@ class MainWindow(QMainWindow):
         self.download_table.retry_requested.connect(self._on_retry_requested)
         self.download_table.force_download_requested.connect(self._on_force_download_requested)
         self.download_table.clear_all_requested.connect(self._on_clear_all_requested)
+
+        # History tab actions
+        self.history_tab.redownload_requested.connect(self._on_history_redownload)
+        self.history_tab.remove_history_requested.connect(self._on_history_remove)
 
         # Settings -> engine (live propagation)
         self.settings_panel.settings_changed.connect(self._apply_settings)
@@ -120,6 +137,8 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def _on_channel_url(self, url: str) -> None:
         """Switch to Channel tab and start browsing."""
+        # Set on whichever sub-panel matches the URL platform; channel_browser
+        # detects platform and switches sub-tabs.
         self.channel_browser.url_input.setText(url)
         self.tabs.setCurrentWidget(self.channel_browser)
         self.channel_browser._on_browse()
@@ -132,6 +151,38 @@ class MainWindow(QMainWindow):
         self.engine.add_urls(urls)
         self.tabs.setCurrentWidget(self.download_tab)
         self._update_status_count()
+
+    @Slot(list)
+    def _on_urls_dropped(self, urls: list[str]) -> None:
+        """Drag-dropped or imported URLs — queue them."""
+        for url in urls:
+            self.download_table.add_download(url)
+        self.engine.add_urls(urls)
+        self.tabs.setCurrentWidget(self.download_tab)
+        self._update_status_count()
+
+    @Slot(str)
+    def _on_export_requested(self, path: str) -> None:
+        """Write current queue + history URLs to ``path`` (.txt)."""
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                queue_urls = [
+                    d.get("url") for d in self.download_table._row_data.values() if d.get("url")
+                ]
+                if queue_urls:
+                    f.write("# === Queue ===\n")
+                    for u in queue_urls:
+                        f.write(f"{u}\n")
+                records = load_history_records()
+                if records:
+                    f.write("\n# === History ===\n")
+                    for r in records:
+                        if r.url:
+                            f.write(f"# platform: {r.platform or '-'} uploader: {r.uploader or '-'}\n")
+                            f.write(f"{r.url}\n")
+            self.update_status(f"Exported to {path}")
+        except OSError as exc:
+            self.update_status(f"Export failed: {exc}")
 
     @Slot(str, object)
     def _on_download_finished(self, url: str, result) -> None:
@@ -164,6 +215,23 @@ class MainWindow(QMainWindow):
         self.engine.clear_dedup(urls)
         self._update_status_count()
 
+    @Slot(str)
+    def _on_history_redownload(self, url: str) -> None:
+        """Re-download a history row: switch to Download tab and force re-queue."""
+        self.download_table.add_download(url)
+        self.engine.retry_url(url, force=True)
+        self.tabs.setCurrentWidget(self.download_tab)
+        self._update_status_count()
+
+    @Slot(str)
+    def _on_history_remove(self, video_id: str) -> None:
+        """Drop a record from history persistently and refresh the tab."""
+        records = [r for r in load_history_records() if r.video_id != video_id]
+        save_history_records(records)
+        # Also drop from in-memory dedup so the engine re-allows re-queue without force.
+        self.engine._history.discard(video_id)
+        self.history_tab.refresh()
+
     def _update_status_count(self) -> None:
         done = self.download_table.get_completed_count()
         total = self.download_table.get_total_count()
@@ -176,7 +244,11 @@ class MainWindow(QMainWindow):
         self.engine.max_workers = self.config.workers
         self.engine.delay = self.config.delay
         self.engine.cookie_browser = self.config.cookie_browser
-        self.channel_browser.cookie_browser = self.config.cookie_browser
+        self.engine.quality = self.config.quality_default
+        self.engine.write_subs = self.config.write_subtitles
+        self.engine.write_thumb = self.config.write_thumbnail
+        self.engine.history_max_entries = self.config.history_max_entries
+        self.channel_browser.set_cookie_browser(self.config.cookie_browser)
 
     def _setup_menu(self) -> None:
         """Create menu bar with File and Help menus."""
