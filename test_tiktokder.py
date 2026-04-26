@@ -243,6 +243,12 @@ class TestValidateUrl:
     def test_facebook_url_valid(self):
         assert validate_url("https://www.facebook.com/user/videos/123") is True
 
+    def test_tiktok_channel_url_valid(self):
+        # Profile/channel URLs must pass — paste/drop/save flows depend on it.
+        assert validate_url("https://www.tiktok.com/@user") is True
+        # Usernames may contain dots (real-world case that regressed).
+        assert validate_url("https://www.tiktok.com/@phylicia.lowell") is True
+
     def test_youtube_url_invalid(self):
         assert validate_url("https://www.youtube.com/watch?v=abc") is False
 

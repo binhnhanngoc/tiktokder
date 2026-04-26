@@ -53,8 +53,17 @@ def validate_facebook_url(url: str) -> bool:
 
 
 def validate_url(url: str) -> bool:
-    """Check if URL is a valid TikTok or Facebook URL."""
-    return validate_tiktok_url(url) or validate_facebook_url(url)
+    """Check if URL is a valid TikTok or Facebook URL (video OR channel/page).
+
+    Channel/profile URLs (e.g. ``https://www.tiktok.com/@user``) must pass so
+    paste/drop/import flows can route them — downstream code uses
+    ``detect_platform`` and ``is_page_or_channel_url`` to dispatch.
+    """
+    return (
+        validate_tiktok_url(url)
+        or validate_facebook_url(url)
+        or is_page_or_channel_url(url)
+    )
 
 
 def is_channel_url(url: str) -> bool:
