@@ -1,5 +1,6 @@
 """QThread worker for fetching channel/page video listings via yt-dlp."""
 
+import re
 from dataclasses import dataclass
 
 import yt_dlp
@@ -17,6 +18,21 @@ class VideoInfo:
     view_count: int | None
     upload_date: str | None  # YYYYMMDD
     video_id: str
+    quality: str | None = None  # e.g. "720p"; None when metadata absent
+
+
+def quality_from_entry(entry: dict) -> str | None:
+    """Best-effort quality string from a yt-dlp flat-playlist entry.
+
+    Returns ``"<height>p"`` when a numeric height is present, else parses a
+    height token from the format string (``"720p"``), else ``None``.
+    """
+    h = entry.get("height")
+    if isinstance(h, int) and h > 0:
+        return f"{h}p"
+    fmt = entry.get("format") or ""
+    m = re.search(r"(\d{3,4})p", fmt)
+    return f"{m.group(1)}p" if m else None
 
 
 class ChannelFetcher(QThread):
@@ -81,6 +97,7 @@ class ChannelFetcher(QThread):
                         view_count=entry.get("view_count"),
                         upload_date=entry.get("upload_date"),
                         video_id=video_id,
+                        quality=quality_from_entry(entry),
                     )
                     self.video_found.emit(video)
                     count += 1

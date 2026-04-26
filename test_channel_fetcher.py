@@ -38,6 +38,39 @@ class TestVideoInfo:
         assert v.duration is None
         assert v.view_count is None
         assert v.upload_date is None
+        assert v.quality is None  # default
+
+    def test_video_info_quality_field(self):
+        v = VideoInfo(
+            url="https://example.com",
+            title="HD clip",
+            duration=10,
+            view_count=None,
+            upload_date=None,
+            video_id="789",
+            quality="720p",
+        )
+        assert v.quality == "720p"
+
+
+class TestQualityFromEntry:
+    """quality_from_entry helper used by fetchers to populate VideoInfo.quality."""
+
+    def test_height_int_returns_p_string(self):
+        from channel_fetcher import quality_from_entry
+        assert quality_from_entry({"height": 720}) == "720p"
+
+    def test_format_string_height_token(self):
+        from channel_fetcher import quality_from_entry
+        assert quality_from_entry({"format": "mp4 1080p"}) == "1080p"
+
+    def test_no_metadata_returns_none(self):
+        from channel_fetcher import quality_from_entry
+        assert quality_from_entry({}) is None
+
+    def test_height_zero_falls_through(self):
+        from channel_fetcher import quality_from_entry
+        assert quality_from_entry({"height": 0}) is None
 
 
 class TestChannelFetcher:
