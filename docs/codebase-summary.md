@@ -4,12 +4,19 @@
 
 TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloading TikTok and Facebook videos without watermarks. Organized into three layers: user interface (PySide6 GUI, Rich CLI), shared business logic, and external dependencies (yt-dlp, Playwright).
 
-**Current Statistics:**
-- **Total Python Modules:** 18 (7 core + 1 CLI + 1 GUI + 6 GUI components + 3 extras)
-- **Test Coverage:** 104+ tests across 4 test files
-- **Lines of Code:** ~2,794 (including comments and docstrings)
+**Current Statistics (v1.2.0):**
+- **Total Python Modules:** 22 (8 core + 1 CLI + 1 GUI + 9 GUI components + 3 extras)
+- **Test Coverage:** 257 tests across 7 test files
 - **Python Version:** 3.10+
 - **External Dependencies:** 6 (yt-dlp, PySide6, Rich, pytest, PyInstaller, Playwright)
+
+### v1.2.0 additions
+- `history_store.py` — schema-v2 history persistence with v1 auto-migration, atomic writes, FIFO cap.
+- `path_builder.py` — pure helpers for slugify + platform/uploader-aware yt-dlp `outtmpl`.
+- `gui/history_tab.py` — 4th top-level tab with rich record list, search, platform filter, stats, context menu.
+- `gui/download_tab.py` — wraps URL input + queue table; owns drag-drop + Import/Export.
+- `gui/base_browser_panel.py`, `gui/tiktok_browser_panel.py`, `gui/facebook_browser_panel.py` — replaces monolithic `channel_browser.py` with a thin `QTabWidget` wrapper + per-platform sub-panels.
+- `test_history_records.py`, `test_path_builder.py`, `test_engine_history_integration.py` — ~50 new tests.
 
 ## Module Inventory
 
@@ -151,10 +158,11 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
   - Manages window geometry persistence
   - Coordinates between tabs and download engine
 
-**Tabs:**
-1. URL Input Panel (UrlInputPanel)
-2. Channel Browser (ChannelBrowser)
-3. Settings Panel (SettingsPanel)
+**Tabs (v1.2.0):**
+1. **Download** — `DownloadTab` wrapper (URL input + queue table + drag-drop + Import/Export)
+2. **Channel / Page** — `ChannelBrowser` (QTabWidget with TikTok and Facebook sub-panels, each with own URL input + Quality column)
+3. **History** — `HistoryTab` (rich-record list with search, platform filter, stats, right-click actions)
+4. **Settings** — `SettingsPanel` (now also: Default Quality combo, Write subtitles toggle, Write thumbnail toggle)
 
 #### 10. `gui/url_input_panel.py`
 **Purpose:** Single URL input and download controls

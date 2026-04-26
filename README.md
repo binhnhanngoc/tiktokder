@@ -2,16 +2,20 @@
 
 A Python desktop and CLI tool for batch-downloading videos from TikTok and Facebook without watermarks. Dual interface: PySide6 GUI or CLI with Rich progress UI.
 
-**v1.1.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
+**v1.2.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
 
 ## Features
 
 - **Dual Interface** — Desktop GUI (PySide6) and CLI (Rich + Argparse)
 - **Multi-platform** — TikTok videos and Facebook videos in single batch
 - **Download Modes** — Single URL, batch files, user profiles, Facebook pages
-- **Channel Browsing** — Discover and download from TikTok channels via GUI
+- **Channel Browsing** — Dedicated **TikTok** and **Facebook** sub-tabs in the GUI, each with independent URL state and a quality column
+- **History Tab** — Browse every downloaded video with rich metadata (title, platform, uploader, quality, size, date, path); filter by platform or live search; right-click to open file, open folder, re-download, copy URL, or remove
+- **Quality Selector** — Default Quality setting (`Best`, `1080p`, `720p`, `480p`, `Audio only`) plus optional subtitle (`en`) and thumbnail downloads
 - **Concurrent Downloads** — ThreadPoolExecutor with configurable workers (default: 3)
-- **Duplicate Detection** — Filesystem scan; auto-skip already-downloaded videos
+- **Per-uploader Folder Layout** — Output organized as `downloads/{platform}/{uploader}/{id}_{title}.{ext}`
+- **Drag-and-drop & Import/Export** — Drop URLs or `.txt` files onto the Download tab; round-trip via Import/Export buttons
+- **Duplicate Detection** — Recursive filesystem scan; auto-skip already-downloaded videos (works across the new tree and any legacy flat-root files)
 - **Real-time Progress** — GUI table updates + CLI progress bar with percentages
 - **Rate Limiting** — Configurable inter-request delay to respect platform limits
 - **Watermark Removal** — yt-dlp extraction for clean output
@@ -30,6 +34,16 @@ A Python desktop and CLI tool for batch-downloading videos from TikTok and Faceb
 ```bash
 python app.py
 ```
+
+GUI tabs:
+- **Download** — single URL bar, queue table, drag-drop URLs or `.txt` files, Import/Export buttons.
+- **Channel / Page** — TikTok sub-tab (yt-dlp flat playlist) and Facebook sub-tab (Playwright scraping). Each preserves URL + table state when switching.
+- **History** — full record list with search, platform filter, stats, right-click actions.
+- **Settings** — output folder, concurrency, delay, cookie browser, default quality, subtitles toggle, thumbnail toggle.
+
+### Drag and drop
+
+Drop a TikTok or Facebook URL anywhere on the Download tab to add it to the queue. Drop a `.txt` batch file to import all URLs from it. Invalid URLs are silently dropped (consistent with batch-file parsing).
 
 ### Command-line interface (CLI)
 
@@ -75,40 +89,48 @@ python main.py --facebook-page "https://www.facebook.com/pagename"
 
 **Note**: Use exactly one input mode (URL, `--batch`, `--user`, or `--facebook-page`).
 
-## Examples
+## Settings (GUI)
 
-Download 5 videos concurrently to a custom folder:
-```bash
-python main.py --batch urls.txt --output ./my_videos --workers 5
-```
+| Setting | Values | Notes |
+|---------|--------|-------|
+| Output Directory | path | per-uploader subfolders are created automatically |
+| Concurrent Downloads | 1–10 | platform-aware pacing applies on top |
+| Delay Between Downloads | 0.0–10.0 s | gaussian jitter applied per platform |
+| Cookie Browser | None / chrome / firefox / edge | only used for TikTok (Facebook uses Playwright) |
+| Default Quality | `Best`, `1080p`, `720p`, `480p`, `Audio only` | audio-only writes `.m4a` (requires ffmpeg) |
+| Write subtitles (en) | on / off | sidecar `.srt` next to the video |
+| Write thumbnail | on / off | sidecar `.jpg` next to the video |
 
-Download a user's profile with 2-second delay between requests:
-```bash
-python main.py --user @tiktok --delay 2.0
-```
-
-## How It Works
-
-1. **URL Validation**: Validates TikTok and Facebook URLs using regex patterns
-2. **Platform Detection**: Automatically detects whether URL is TikTok or Facebook
-3. **Batch Processing**: Reads files, removes duplicates and comments, supports mixed platforms
-4. **Skip Check**: Scans output directory to avoid re-downloading
-5. **Concurrent Download**: Uses ThreadPoolExecutor for parallel downloads via yt-dlp
-6. **Progress Tracking**: Displays real-time progress with Rich library
-7. **Clean Output**: Video filenames include video ID and title
+All settings auto-save and propagate to in-flight engine state on change.
 
 ## Output
 
-Videos are saved to the output directory (default: `./downloads/`) with filenames like:
+Videos are saved under the output directory (default: `./downloads/`) using a platform-aware tree:
 ```
-1234567890_video_title.mp4
+downloads/
+├── tiktok/
+│   ├── @user1/
+│   │   └── 1234567890_video_title.mp4
+│   └── unknown_uploader/
+│       └── 7234567899_orphan.mp4
+└── facebook/
+    └── pagename/
+        └── 12345678_video.mp4
 ```
+
+Filenames keep the `{video_id}_{title}.ext` shape so legacy flat-root files (from prior versions) remain dedup-recognized.
+
+## History
+
+`data/history.json` persists rich `HistoryRecord` rows (schema v2) including platform, uploader, quality, size, downloaded-at timestamp, and file path. Old v1 files (a list of bare IDs) are auto-migrated on first write — no data is lost.
+
+A soft FIFO cap of **10 000** entries trims oldest metadata when exceeded; downloaded files on disk are untouched. Configurable via `AppConfig.history_max_entries`.
 
 ## Testing
 
 Run the test suite:
 ```bash
-pytest test_tiktokder.py -v
+pytest -v
 ```
 
 ## Requirements
@@ -117,6 +139,7 @@ pytest test_tiktokder.py -v
 - yt-dlp (for video extraction)
 - Rich (for CLI progress UI)
 - PySide6 (for desktop GUI)
+- Playwright (optional — required only for Facebook page scraping)
 - pytest (for testing)
 - PyInstaller (for packaging)
 
@@ -128,10 +151,12 @@ See `requirements.txt` for exact versions.
 - **Missing batch files**: Error message with file path
 - **Network failures**: Logged per video; batch continues
 - **Duplicate prevention**: Already-downloaded videos skipped automatically
+- **Login walls**: detected and surfaced fast on Facebook to preserve retry budget
+- **Missing ffmpeg**: warned once; most non-merge downloads still succeed
 
 ## Notes
 
-- Respects TikTok's rate limits with configurable `--delay`
+- Respects platform rate limits with platform-aware gaussian pacing (`--delay` is a mean)
 - No API keys or credentials required
 - Videos are downloaded without watermarks
 - User profile downloads may take time depending on profile size
