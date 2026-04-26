@@ -2,6 +2,7 @@
 
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -15,6 +16,9 @@ from PySide6.QtWidgets import (
 )
 
 from config import AppConfig, save_config
+from gui import theme
+
+_THEME_MODE_LABELS = (("System", "system"), ("Light", "light"), ("Dark", "dark"))
 
 # UI label → AppConfig.quality_default value (validated on save).
 QUALITY_LABELS = (
@@ -37,6 +41,26 @@ class SettingsPanel(QWidget):
         self.config = config
 
         layout = QFormLayout(self)
+
+        # Appearance — System / Light / Dark segmented control
+        appearance_row = QHBoxLayout()
+        self.theme_group = QButtonGroup(self)
+        self.theme_group.setExclusive(True)
+        self._theme_buttons: dict[str, QPushButton] = {}
+        for label, value in _THEME_MODE_LABELS:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            self._theme_buttons[value] = btn
+            self.theme_group.addButton(btn)
+            appearance_row.addWidget(btn)
+        appearance_row.addStretch()
+        # Pre-check current mode without firing _on_theme_toggled.
+        active = config.theme_mode if config.theme_mode in self._theme_buttons else "system"
+        self._theme_buttons[active].blockSignals(True)
+        self._theme_buttons[active].setChecked(True)
+        self._theme_buttons[active].blockSignals(False)
+        self.theme_group.buttonToggled.connect(self._on_theme_toggled)
+        layout.addRow("Appearance:", appearance_row)
 
         # Output directory
         dir_row = QHBoxLayout()
@@ -139,3 +163,24 @@ class SettingsPanel(QWidget):
         self._select_quality(defaults.quality_default)
         self.subs_check.setChecked(defaults.write_subtitles)
         self.thumb_check.setChecked(defaults.write_thumbnail)
+        # Re-arm Appearance to System without echoing twice through _save.
+        sys_btn = self._theme_buttons["system"]
+        sys_btn.blockSignals(True)
+        sys_btn.setChecked(True)
+        sys_btn.blockSignals(False)
+        theme.set_mode("system")
+        self.config.theme_mode = "system"
+        save_config(self.config)
+
+    @Slot(object, bool)
+    def _on_theme_toggled(self, button, checked: bool) -> None:
+        """Handle Appearance segmented-control toggle."""
+        if not checked:
+            return
+        for value, btn in self._theme_buttons.items():
+            if btn is button:
+                theme.set_mode(value)
+                self.config.theme_mode = value
+                save_config(self.config)
+                self.settings_changed.emit()
+                return

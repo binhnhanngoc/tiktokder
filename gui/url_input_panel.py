@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QApplication,
 )
 
+from gui.icons import icon
+from gui.tokens import token
 from url_parser import validate_url, is_page_or_channel_url
 
 
@@ -32,10 +34,12 @@ class UrlInputPanel(QWidget):
         layout.addWidget(self.url_input, stretch=1)
 
         self.paste_btn = QPushButton("Paste")
+        self.paste_btn.setIcon(icon("mdi6.content-paste"))
         self.paste_btn.clicked.connect(self._on_paste)
         layout.addWidget(self.paste_btn)
 
         self.add_btn = QPushButton("Add")
+        self.add_btn.setIcon(icon("mdi6.plus"))
         self.add_btn.clicked.connect(self._on_add)
         layout.addWidget(self.add_btn)
 
@@ -64,5 +68,5 @@ class UrlInputPanel(QWidget):
             self.video_url_submitted.emit(url)
             self.url_input.clear()
         else:
-            self.url_input.setStyleSheet("border: 1px solid red;")
+            self.url_input.setStyleSheet(f"border: 1px solid {token('state.error')};")
             self.url_input.setPlaceholderText("Invalid URL")

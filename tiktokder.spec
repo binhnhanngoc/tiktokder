@@ -54,7 +54,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,  # GUI — no terminal window
     icon='assets/icon.ico',
 )
@@ -95,7 +95,7 @@ cli_exe = EXE(
     name='TikTokDer-CLI',
     debug=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=True,  # CLI needs terminal output
 )
 
@@ -110,6 +110,6 @@ coll = COLLECT(
     cli_a.binaries,
     cli_a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     name='TikTokDer',
 )

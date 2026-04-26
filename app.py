@@ -31,6 +31,10 @@ def main() -> None:
 
     config = load_config()
 
+    # Apply theme before constructing the window to avoid a flash on first paint.
+    from gui import theme
+    theme.bootstrap(app, config)
+
     # Import here to avoid circular imports during setup
     from gui.main_window import MainWindow
 

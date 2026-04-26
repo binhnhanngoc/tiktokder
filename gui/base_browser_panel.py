@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from channel_fetcher import VideoInfo
+from gui.icons import icon
 
 _HEADERS = ("", "Title", "Duration", "Quality", "Views", "Date")
 
@@ -45,6 +46,7 @@ class BaseBrowserPanel(QWidget):
         top.addWidget(self.url_input, stretch=1)
 
         self.browse_btn = QPushButton("Browse")
+        self.browse_btn.setIcon(icon("mdi6.magnify"))
         self.browse_btn.clicked.connect(self._on_browse)
         top.addWidget(self.browse_btn)
         layout.addLayout(top)
@@ -61,16 +63,19 @@ class BaseBrowserPanel(QWidget):
 
         bottom = QHBoxLayout()
         self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.setIcon(icon("mdi6.checkbox-multiple-marked-outline"))
         self.select_all_btn.clicked.connect(self._select_all)
         bottom.addWidget(self.select_all_btn)
 
         self.deselect_all_btn = QPushButton("Deselect All")
+        self.deselect_all_btn.setIcon(icon("mdi6.checkbox-multiple-blank-outline"))
         self.deselect_all_btn.clicked.connect(self._deselect_all)
         bottom.addWidget(self.deselect_all_btn)
 
         bottom.addStretch()
 
         self.download_btn = QPushButton("Download Selected")
+        self.download_btn.setIcon(icon("mdi6.download"))
         self.download_btn.clicked.connect(self._on_download)
         bottom.addWidget(self.download_btn)
         layout.addLayout(bottom)

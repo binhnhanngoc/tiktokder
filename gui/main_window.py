@@ -24,6 +24,7 @@ from download_engine import DownloadEngine
 from gui.channel_browser import ChannelBrowser
 from gui.download_tab import DownloadTab
 from gui.history_tab import HistoryTab
+from gui.icons import icon
 from gui.settings_panel import SettingsPanel
 
 
@@ -254,9 +255,9 @@ class MainWindow(QMainWindow):
         """Create menu bar with File and Help menus."""
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("&File")
-        file_menu.addAction("E&xit", self.close)
+        file_menu.addAction(icon("mdi6.exit-to-app"), "E&xit", self.close)
         help_menu = menu_bar.addMenu("&Help")
-        help_menu.addAction("&About", self._show_about)
+        help_menu.addAction(icon("mdi6.information-outline"), "&About", self._show_about)
 
     @Slot()
     def _show_about(self) -> None:

@@ -93,6 +93,7 @@ class AppConfig:
     write_subtitles: bool = False
     write_thumbnail: bool = False
     history_max_entries: int = DEFAULT_MAX_ENTRIES
+    theme_mode: str = "system"           # one of system|light|dark
 
 
 @dataclass(frozen=True)

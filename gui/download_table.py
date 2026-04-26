@@ -1,6 +1,7 @@
 """Download queue table with per-row progress bars and status indicators."""
 
 from PySide6.QtCore import Signal, Slot, Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -16,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from downloader import DownloadResult
+from gui.icons import icon
+from gui.tokens import token
 
 
 # Status constants
@@ -26,14 +29,15 @@ STATUS_FAILED = "Failed"
 STATUS_SKIPPED = "Skipped"
 STATUS_CANCELLED = "Cancelled"
 
-# Color map for status text
-STATUS_COLORS = {
-    STATUS_QUEUED: "#888888",
-    STATUS_DOWNLOADING: "#d4a017",
-    STATUS_COMPLETE: "#2ecc71",
-    STATUS_FAILED: "#e74c3c",
-    STATUS_SKIPPED: "#95a5a6",
-    STATUS_CANCELLED: "#95a5a6",
+# Map status → semantic token name. Resolved per-call so a live theme switch
+# repaints the next ``_set_status`` invocation with the new palette.
+_STATUS_TOKENS = {
+    STATUS_QUEUED: "text.muted",
+    STATUS_DOWNLOADING: "state.warning",
+    STATUS_COMPLETE: "state.success",
+    STATUS_FAILED: "state.error",
+    STATUS_SKIPPED: "text.muted",
+    STATUS_CANCELLED: "text.muted",
 }
 
 
@@ -63,18 +67,22 @@ class DownloadTableWidget(QWidget):
         # Toolbar
         toolbar = QHBoxLayout()
         self.clear_btn = QPushButton("Clear Completed")
+        self.clear_btn.setIcon(icon("mdi6.broom"))
         self.clear_btn.clicked.connect(self._clear_completed)
         toolbar.addWidget(self.clear_btn)
 
         self.clear_all_btn = QPushButton("Clear All")
+        self.clear_all_btn.setIcon(icon("mdi6.delete-sweep"))
         self.clear_all_btn.clicked.connect(self._clear_all)
         toolbar.addWidget(self.clear_all_btn)
 
         self.retry_failed_btn = QPushButton("Retry Failed")
+        self.retry_failed_btn.setIcon(icon("mdi6.refresh"))
         self.retry_failed_btn.clicked.connect(self._retry_all_failed)
         toolbar.addWidget(self.retry_failed_btn)
 
         self.cancel_all_btn = QPushButton("Cancel All")
+        self.cancel_all_btn.setIcon(icon("mdi6.stop"))
         toolbar.addWidget(self.cancel_all_btn)
 
         toolbar.addStretch()
@@ -158,14 +166,11 @@ class DownloadTableWidget(QWidget):
         )
 
     def _set_status(self, row: int, status: str) -> None:
-        """Set status cell with color."""
+        """Set status cell with semantic-token-resolved color."""
         item = QTableWidgetItem(status)
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        color = STATUS_COLORS.get(status, "#888888")
-        item.setForeground(Qt.GlobalColor.white)
-        # Use simple text coloring
-        from PySide6.QtGui import QColor
-        item.setForeground(QColor(color))
+        token_name = _STATUS_TOKENS.get(status, "text.muted")
+        item.setForeground(QColor(token(token_name)))
         self.table.setItem(row, 1, item)
         if row in self._row_data:
             self._row_data[row]["status"] = status
