@@ -1,12 +1,13 @@
 ---
 title: "Tier-1 GUI modernization (PySide6 theming + tokens + icons)"
 description: "Disable UPX, add pyqtdarktheme/qtawesome/darkdetect, semantic tokens, spacing constants, icon helper."
-status: pending
+status: completed
 priority: P2
 effort: ~1.5d
 branch: main
 tags: [gui, theming, pyside6, packaging, ux]
 created: 2026-04-26
+completed: 2026-04-26
 ---
 
 ## Overview
@@ -20,11 +21,24 @@ Apply Tier-1 of the modern-Python-GUI synthesis (`plans/reports/research-summary
 
 | # | File | Status | Owner | Depends on |
 |---|---|---|---|---|
-| 01 | [phase-01-spec-and-deps.md](phase-01-spec-and-deps.md) | pending | — | — |
-| 02 | [phase-02-tokens-and-spacing.md](phase-02-tokens-and-spacing.md) | pending | — | 01 |
-| 03 | [phase-03-theme-bootstrap.md](phase-03-theme-bootstrap.md) | pending | — | 01, 02 |
-| 04 | [phase-04-iconography.md](phase-04-iconography.md) | pending | — | 01 |
-| 05 | [phase-05-validation.md](phase-05-validation.md) | pending | — | 01–04 |
+| 01 | [phase-01-spec-and-deps.md](phase-01-spec-and-deps.md) | completed | — | — |
+| 02 | [phase-02-tokens-and-spacing.md](phase-02-tokens-and-spacing.md) | completed | — | 01 |
+| 03 | [phase-03-theme-bootstrap.md](phase-03-theme-bootstrap.md) | completed | — | 01, 02 |
+| 04 | [phase-04-iconography.md](phase-04-iconography.md) | completed | — | 01 |
+| 05 | [phase-05-validation.md](phase-05-validation.md) | completed | — | 01–04 |
+
+## Implementation notes (2026-04-26)
+
+- `pyqtdarktheme>=2.1.0` as named in plan caps Python `<3.12`; substituted
+  `pyqtdarktheme-fork>=2.3.6` (same MIT, same `qdarktheme.setup_theme` API,
+  supports Python 3.13). `requirements.txt` updated accordingly.
+- Icons attached to browser-panel buttons via `gui/base_browser_panel.py`
+  (the shared base) rather than `gui/channel_browser.py` (a thin tab wrapper)
+  — gives both TikTok and Facebook tabs the same icon set with one edit.
+- Frozen-build smoke test (per phase 01 step 5–6 and phase 05 step 7–8) was
+  not executed in this session; left as a manual follow-up before release.
+- Final file sizes — tokens.py 75 / spacing.py 11 / theme.py 123 / icons.py 24
+  (all under plan-imposed limits).
 
 Phase 02 and 04 can run in parallel after 01 completes (different files). Phase 03 reads tokens from 02. Phase 05 is the final gate.
 

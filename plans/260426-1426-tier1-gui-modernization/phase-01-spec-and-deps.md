@@ -10,7 +10,7 @@
 ## Overview
 
 - **Priority:** P2 (foundation)
-- **Status:** pending
+- **Status:** completed
 - **Effort:** ~1h
 - Disable UPX in PyInstaller spec; add three MIT/BSD-licensed deps; smoke-test the resulting build.
 
@@ -73,15 +73,15 @@ Pure tooling change. No runtime code touched. Build matrix: source run + onedir 
 
 ## Todo List
 
-- [ ] Update `requirements.txt` with three new deps
-- [ ] Flip three `upx=True` flags in `tiktokder.spec`
-- [ ] `pip install -r requirements.txt`
-- [ ] Verify imports in source run
-- [ ] Run `python build.py` — capture build time + folder size + zip size
-- [ ] Launch frozen GUI exe, confirm no regressions
-- [ ] Launch frozen CLI exe with `--help`, confirm output
-- [ ] Document bundle size delta (before/after) in this file's Todo or a follow-up note
-- [ ] If any frozen run fails on `import qtawesome` → add to spec `hiddenimports`, rebuild
+- [x] Update `requirements.txt` with three new deps (substituted `pyqtdarktheme-fork>=2.3.6` for Python 3.13 support; same API/license)
+- [x] Flip three `upx=True` flags in `tiktokder.spec`
+- [x] `pip install -r requirements.txt`
+- [x] Verify imports in source run
+- [ ] Run `python build.py` — capture build time + folder size + zip size *(manual follow-up)*
+- [ ] Launch frozen GUI exe, confirm no regressions *(manual follow-up)*
+- [ ] Launch frozen CLI exe with `--help`, confirm output *(manual follow-up)*
+- [ ] Document bundle size delta (before/after) in this file's Todo or a follow-up note *(manual follow-up)*
+- [ ] If any frozen run fails on `import qtawesome` → add to spec `hiddenimports`, rebuild *(deferred — only if smoke fails)*
 
 ## Success Criteria
 

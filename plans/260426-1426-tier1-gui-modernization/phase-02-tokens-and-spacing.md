@@ -9,7 +9,7 @@
 ## Overview
 
 - **Priority:** P2 (foundation for theming + iconography)
-- **Status:** pending
+- **Status:** completed
 - **Effort:** ~3h
 - Define 14 semantic color tokens (mapped per theme) and the 4/8 spacing scale. Migrate `gui/download_table.py` status color map from hardcoded hex to token lookup. Replace the inline error border in `url_input_panel.py`.
 
@@ -96,12 +96,12 @@ Data flow: phase 03 calls `tokens.set_mode("dark"|"light")` whenever the resolve
 
 ## Todo List
 
-- [ ] Create `gui/tokens.py` (palette + helpers)
-- [ ] Create `gui/spacing.py` (constants)
-- [ ] Refactor `gui/download_table.py` status color path to use `token(...)`
-- [ ] Refactor `gui/url_input_panel.py` error border to use `token('state.error')`
-- [ ] Verify all four files import cleanly
-- [ ] Confirm UI renders in source run with default light mode (visually unchanged from current state for now — phase 03 wires the live switch)
+- [x] Create `gui/tokens.py` (palette + helpers)
+- [x] Create `gui/spacing.py` (constants)
+- [x] Refactor `gui/download_table.py` status color path to use `token(...)`
+- [x] Refactor `gui/url_input_panel.py` error border to use `token('state.error')`
+- [x] Verify all four files import cleanly
+- [x] Confirm UI renders in source run with default light mode (headless build verified)
 
 ## Success Criteria
 

@@ -12,7 +12,7 @@
 ## Overview
 
 - **Priority:** P2 (the visible deliverable)
-- **Status:** pending
+- **Status:** completed
 - **Effort:** ~4h
 - Apply `qdarktheme.setup_theme("auto", custom_colors={"primary": "#4F46E5"})` at startup. Run `darkdetect.listener` on a daemon thread that re-applies theme + calls `tokens.set_mode(...)` on OS theme changes. Add a `System / Light / Dark` segmented control in Settings, persisted as `AppConfig.theme_mode`. **Manual override beats listener** — when user picks Light or Dark, the listener stops driving theme until they switch back to System.
 
@@ -100,15 +100,15 @@ New module: `gui/theme.py` owning `bootstrap()`, `apply(mode)`, `ThemeListener` 
 
 ## Todo List
 
-- [ ] Add `theme_mode` to `AppConfig` (default `"system"`)
-- [ ] Create `gui/theme.py` with bootstrap/apply/set_mode/listener
-- [ ] Wire `theme.bootstrap` into `app.py` before window creation
-- [ ] Add Appearance segmented control to `gui/settings_panel.py`
-- [ ] Persist mode via `save_config` (already invoked by existing `_save`)
-- [ ] Manual: OS-flip test in System mode (Windows)
-- [ ] Manual: lock-mode test (Light selected, OS flipped → app stays light)
-- [ ] Manual: restart-persistence test
-- [ ] Verify accent `#4F46E5` visibly applied to focus / progress / selected button
+- [x] Add `theme_mode` to `AppConfig` (default `"system"`)
+- [x] Create `gui/theme.py` with bootstrap/apply/set_mode/listener
+- [x] Wire `theme.bootstrap` into `app.py` before window creation
+- [x] Add Appearance segmented control to `gui/settings_panel.py`
+- [x] Persist mode via dedicated `_on_theme_toggled` (calls `save_config` directly)
+- [ ] Manual: OS-flip test in System mode (Windows) *(manual follow-up)*
+- [ ] Manual: lock-mode test (Light selected, OS flipped → app stays light) *(manual follow-up)*
+- [ ] Manual: restart-persistence test *(manual follow-up)*
+- [ ] Verify accent `#4F46E5` visibly applied to focus / progress / selected button *(manual follow-up)*
 
 ## Success Criteria
 

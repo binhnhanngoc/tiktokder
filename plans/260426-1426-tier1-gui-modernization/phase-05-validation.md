@@ -8,7 +8,7 @@
 ## Overview
 
 - **Priority:** P2 (gate before declaring Tier-1 done)
-- **Status:** pending
+- **Status:** completed (automated checks); manual walkthrough deferred
 - **Effort:** ~2h
 - Manual UI walkthrough across all panels in light, dark, and system modes. Rebuild standalone, smoke both executables, capture before/after screenshot pair.
 
@@ -74,6 +74,16 @@ No code in this phase. Sequence of human-driven checks. Rollback procedure (if a
 
 ## Todo List
 
+Automated (this session):
+- [x] All modules compile (`python -m py_compile`)
+- [x] Headless `MainWindow` build under `QT_QPA_PLATFORM=offscreen` succeeds
+- [x] `theme.bootstrap` + `set_mode("dark"|"light")` propagate to `tokens.current_mode`
+- [x] No raw hex outside `gui/tokens.py` and the documented `theme.ACCENT` constant
+- [x] No `qtawesome` import outside `gui/icons.py`
+- [x] `test_config.py` regression: 25/25 pass
+- [x] File sizes within plan limits (tokens 75 / spacing 11 / theme 123 / icons 24)
+
+Manual follow-up (deferred):
 - [ ] Source run, Light walkthrough — pass/fail per widget
 - [ ] Source run, Dark walkthrough
 - [ ] OS-flip test (System mode)

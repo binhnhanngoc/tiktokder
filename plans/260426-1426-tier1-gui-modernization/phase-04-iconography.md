@@ -13,7 +13,7 @@
 ## Overview
 
 - **Priority:** P3 (visible polish, not blocking)
-- **Status:** pending
+- **Status:** completed
 - **Effort:** ~3h
 - Pick **Material Design Icons (`mdi6.*`)** as the single icon set. Provide `gui/icons.py` exposing `icon(name, color=None)` so callers don't import qtawesome directly. Add icons to existing toolbar/menu buttons. Replace any emoji or `QIcon.fromTheme(...)` usage (Grep currently confirms zero emoji and zero `fromTheme`, so this is mostly additive).
 
@@ -104,13 +104,13 @@ callers:
 
 ## Todo List
 
-- [ ] Create `gui/icons.py` (≤25 LoC, cached qtawesome wrapper)
-- [ ] Add icons to `url_input_panel.py` buttons
-- [ ] Add icons to `download_table.py` toolbar
-- [ ] Add icons to `channel_browser.py` buttons
-- [ ] Add icons to `main_window.py` menu actions
-- [ ] Visual check: icons render light + dark, no missing-glyph squares
-- [ ] Grep `qtawesome` usage outside `gui/icons.py` — must return zero matches
+- [x] Create `gui/icons.py` (24 LoC, cached qtawesome wrapper)
+- [x] Add icons to `url_input_panel.py` buttons
+- [x] Add icons to `download_table.py` toolbar
+- [x] Add icons to `base_browser_panel.py` buttons (shared base, covers both TikTok + Facebook tabs)
+- [x] Add icons to `main_window.py` menu actions
+- [ ] Visual check: icons render light + dark, no missing-glyph squares *(manual follow-up)*
+- [x] Grep `qtawesome` usage outside `gui/icons.py` — confirmed zero matches
 
 ## Success Criteria
 
