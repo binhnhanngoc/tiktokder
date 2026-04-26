@@ -4,21 +4,38 @@
 
 ```
 tiktokder/
-├── app.py                      # GUI entry point
-├── main.py                     # CLI entry point
-├── config.py                   # Settings persistence
-├── url_parser.py               # URL validation & parsing (TikTok & Facebook)
-├── downloader.py               # yt-dlp wrapper, concurrent downloads
-├── download_engine.py          # Unified download orchestration
-├── channel_fetcher.py          # TikTok channel & Facebook page fetcher
-├── facebook_fetcher.py         # Playwright-based Facebook scraper
+├── app.py                      # GUI entry point; bootstrap QApp + MainWindow
+├── main.py                     # CLI entry point; argparse dispatcher
+├── config.py                   # AppConfig + PlatformDefaults; persistence
+├── app_state.py                # AppState UI state snapshots (v1.3)
+├── url_parser.py               # URL validation, platform detection, batch parsing
+├── downloader.py               # yt-dlp wrapper; quality profiles; platform-aware jitter
+├── download_engine.py          # Unified orchestration (QThread-based)
+├── channel_fetcher.py          # TikTok channel metadata via yt-dlp flat-playlist
+├── facebook_fetcher.py         # Playwright Facebook scraper; cookies.txt injection
+├── facebook_resolver.py        # fb.watch pre-resolver (curl_cffi)
+├── retry_policy.py             # Tenacity + typed exceptions
+├── history_store.py            # HistoryRecord persistence; v1→v2 migration
+├── path_builder.py             # Slugify + outtmpl builders
+├── saved_channels_store.py     # SavedChannel CRUD + "Download all new" (v1.3)
 ├── gui/
 │   ├── __init__.py
-│   ├── main_window.py          # Main window & tab orchestration
-│   ├── url_input_panel.py      # Single URL input UI
-│   ├── download_table.py       # Download queue display
-│   ├── channel_browser.py      # Channel/page discovery UI
-│   └── settings_panel.py       # Configuration UI
+│   ├── main_window.py          # MainWindow + QTabWidget orchestration
+│   ├── global_url_bar.py       # Persistent URL bar (v1.3)
+│   ├── platform_tab.py         # Per-platform composite widget (v1.3)
+│   ├── saved_channels_panel.py # Saved channels CRUD + browser (v1.3)
+│   ├── library_panel.py        # Two-pane history + uploader sidebar (v1.3)
+│   ├── download_table.py       # Queue sub-tab table widget
+│   ├── base_browser_panel.py   # Shared TikTok/Facebook browser base
+│   ├── tiktok_browser_panel.py # TikTok browser UI
+│   ├── facebook_browser_panel.py # Facebook browser + Scrolls spinbox
+│   ├── status_bar_widget.py    # Status badges (v1.3)
+│   ├── settings_panel.py       # Global/TikTok/Facebook settings
+│   ├── _history_helpers.py     # format_size, format_date, open_path (v1.3)
+│   ├── theme.py                # Dark theme bootstrap + OS listener
+│   ├── tokens.py               # 15 semantic color tokens
+│   ├── spacing.py              # 8pt grid spacing
+│   └── icons.py                # qtawesome icon cache
 ├── docs/
 │   ├── project-overview-pdr.md
 │   ├── code-standards.md
@@ -74,36 +91,39 @@ def validate_tiktok_url(url: str) -> bool:
   - `build_user_url(username: str) -> str` — Build TikTok user profile URL
 
 ### `downloader.py`
-- **Purpose:** Multi-platform video extraction via yt-dlp (TikTok and Facebook)
+- **Purpose:** yt-dlp wrapper for multi-platform video extraction (TikTok + Facebook)
+- **Classes:**
+  - `DownloadResult` — Dataclass: `url, success, video_id, title, error, skipped, file_path`
 - **Functions:**
-  - `get_ydl_opts(output_dir: str) -> dict` — Build yt-dlp options (watermark removal, format)
-  - `download_video(url: str, output_dir: str, progress_hook: Callable | None = None) -> DownloadResult` — Download single video (auto-detects platform)
-  - `download_batch(urls: list[str], output_dir: str, workers: int = 3, delay: float = 1.0, progress_callback: Callable | None = None) -> list[DownloadResult]` — Concurrent downloads (mixed platforms)
-  - `get_downloaded_ids(output_dir: str) -> set[str]` — Get already-downloaded video IDs (filesystem scan)
+  - `get_ydl_opts(output_dir, cookie_browser=None, quality="best", write_subs=False, write_thumb=False, cookies_file=None) -> dict` — Build yt-dlp options (quality preset, impersonate=chrome136, postprocessors)
+  - `download_video(url, output_dir, progress_hook=None, ...) -> DownloadResult` — Single video; pre-resolves FB shortlinks; wraps `_do_download` in tenacity retry
+  - `download_batch(urls, output_dir, workers=3, delay=1.0, progress_callback=None, ...) -> list[DownloadResult]` — Concurrent CLI batch (platform-aware pacing)
 
 ### `download_engine.py`
-- **Purpose:** Unified download orchestration for GUI and CLI
+- **Purpose:** Qt download orchestration for GUI (queue, dedup, history, retries)
 - **Classes:**
-  - `DownloadEngine` — Manages downloads with progress hooks for GUI integration
+  - `DownloadWorker(QThread)` — Runs `download_video()` for one URL; emits `progress`, `finished_download`
+  - `DownloadEngine(QObject)` — Queue manager with concurrency, dedup, history persistence
+- **Signals:** `download_started(url)`, `download_progress(url, percent)`, `download_finished(url, DownloadResult)`, `all_finished()`, `queue_updated(remaining)`, `history_changed()`
 - **Methods:**
-  - `add_urls(urls: list[str])` — Queue videos
-  - `start_downloads()` — Begin concurrent processing
-  - `cancel()` — Stop all downloads
-  - `progress_hook(info: dict) -> None` — Receive yt-dlp progress updates
+  - `add_urls(urls, force=False)` — Queue URLs (skips duplicates + already-downloaded IDs); auto-spawns workers
+  - `cancel_url(url)` — Cancel one active worker
+  - `cancel_all()` — Clear queue + cancel all active
+  - `retry_url(url, force=False)` / `retry_urls(urls, force=False)` — Drop from dedup, re-queue
+  - `apply_runtime_settings(...)` — Live-propagate Settings panel changes
 
 ### `channel_fetcher.py`
-- **Purpose:** Retrieve TikTok channel and Facebook page information and video lists
-- **Functions:**
-  - `get_channel_videos(channel: str, limit: int = 30) -> list[dict]` — Fetch TikTok channel or Facebook page videos
-  - `get_channel_metadata(channel: str) -> dict | None` — Get channel/page info (followers, bio, video count)
+- **Purpose:** TikTok channel video listing via yt-dlp flat-playlist (QThread)
+- **Classes:**
+  - `ChannelFetcher(QThread)` — Emits `video_found(VideoInfo)`, `error(str)`, `finished()`; supports `cancel()`
 
-### `facebook_fetcher.py` (NEW)
-- **Purpose:** Playwright-based Facebook page scraping for video discovery
-- **Functions:**
-  - `scrape_facebook_page(page_url: str, limit: int = 50) -> list[dict]` — Extract videos from Facebook page using headless browser
-  - `get_facebook_page_metadata(page_url: str) -> dict | None` — Retrieve page info (name, follower count)
-- **Dependencies:** Playwright, async browser automation
-- **Notes:** Headless browser required; may trigger Facebook rate limiting
+### `facebook_fetcher.py`
+- **Purpose:** Facebook page/profile scraping via Playwright headless Chromium (QThread)
+- **Classes:**
+  - `FacebookFetcher(QThread)` — Scroll & scrape reel/video links; optional cookies.txt injection (lifts 10-reel anonymous cap); 3-empty-streak stop; supports `cancel()`
+- **Signals:** `video_found(VideoInfo)`, `progress(str)`, `error(str)`, `finished()`
+- **Dependencies:** Playwright (chromium), `facebook_cookies.load_netscape_cookies()`
+- **Notes:** Headless browser required; max_scrolls configurable (1–50); falls back to anonymous if cookies file missing
 
 ### `config.py`
 - **Purpose:** Settings persistence and management
@@ -114,49 +134,123 @@ def validate_tiktok_url(url: str) -> bool:
   - `save_config(config: AppConfig) -> None` — Save to disk
 
 ### `gui/main_window.py`
-- **Purpose:** Main application window and tab orchestration
+- **Purpose:** Main application window with platform-first tab orchestration
 - **Classes:**
-  - `MainWindow(QMainWindow)` — Top-level window with tab widget
+  - `MainWindow(QMainWindow)` — Central: GlobalUrlBar (top) + QTabWidget (TikTok/Facebook/Settings) + StatusBarWidget (bottom)
+- **Responsibilities:** Window geometry persistence, tab signal routing, per-platform queue/library refresh
 
-### `gui/url_input_panel.py`
-- **Purpose:** Single URL input and download controls
+### `gui/global_url_bar.py`
+- **Purpose:** Persistent URL input bar above all tabs
 - **Classes:**
-  - `UrlInputPanel(QWidget)` — URL input field, download button, status label
+  - `GlobalUrlBar(QWidget)` — QLineEdit + Add button, drag-drop support, emits `urls_submitted(list[str])`
+- **Features:** Mixed-platform batch import from `.txt` files, URL MIME drag-drop
+
+### `gui/platform_tab.py`
+- **Purpose:** Per-platform composite widget with 3 sub-tabs
+- **Classes:**
+  - `PlatformTab(platform, browser_panel, store, store_path)` — QTabWidget with Channels / Queue / Library; drag-drop filtered to own platform
+- **Responsibilities:** Sub-tab selection state, platform-scoped signal routing
+
+### `gui/saved_channels_panel.py`
+- **Purpose:** Saved channels management + embedded browser
+- **Classes:**
+  - `SavedChannelsPanel(QWidget)` — Toolbar (Add/Refresh All), channel list table (★/nickname/url/count/last-fetched), embedded browser below
+- **Features:** Right-click CRUD, "Download all new" with dedup filter, star/nickname/notes editing
+
+### `gui/library_panel.py`
+- **Purpose:** Per-platform history with uploader sidebar and discovery
+- **Classes:**
+  - `LibraryPanel(QWidget)` — Two-pane: left uploader sidebar (frequency-sorted, ★ for saved channels), right history table (Title/Quality/Size/Date/Path)
+- **Features:** Search (200ms debounce), per-uploader selection, right-click (Open/Reveal/Re-download/Copy URL/Remove)
 
 ### `gui/download_table.py`
-- **Purpose:** Display download queue and real-time progress
+- **Purpose:** Queue sub-tab table for per-platform downloads
 - **Classes:**
-  - `DownloadTable(QTableWidget)` — Table showing video status, progress, size
+  - `DownloadTableWidget(QWidget)` — URL / Title / Status / Progress / Size columns; toolbar (Clear Completed / Clear All / Retry / Force)
+- **Features:** Right-click for Open/Reveal/Retry/Force/Copy URL/Clear row
 
-### `gui/channel_browser.py`
-- **Purpose:** Channel/page discovery and browsing interface
+### `gui/base_browser_panel.py`
+- **Purpose:** Shared base for TikTok and Facebook browser panels
 - **Classes:**
-  - `ChannelBrowser(QWidget)` — Search TikTok channels or Facebook pages, display video list, batch download
+  - `BaseBrowserPanel(QWidget)` — URL input + Browse button, video table, Select All/Deselect/Download Selected, state snapshot/restore
+
+### `gui/tiktok_browser_panel.py`
+- **Purpose:** TikTok channel browser UI
+- **Classes:**
+  - `TikTokBrowserPanel(BaseBrowserPanel)` — Extends base; dispatches to ChannelFetcher
+
+### `gui/facebook_browser_panel.py`
+- **Purpose:** Facebook page browser with Playwright scrape control
+- **Classes:**
+  - `FacebookBrowserPanel(BaseBrowserPanel)` — Scrolls spinbox (1–50, default 10), "Load more" button to resume Playwright scrape
+
+### `gui/status_bar_widget.py`
+- **Purpose:** Status bar badges
+- **Classes:**
+  - `StatusBarWidget(QWidget)` — Labels for TT count, FB count, Done count, free-text status
 
 ### `gui/settings_panel.py`
-- **Purpose:** Configuration UI
+- **Purpose:** Application configuration UI (Global, TikTok, Facebook)
 - **Classes:**
-  - `SettingsPanel(QWidget)` — Output dir, workers, delay spinboxes with Save button
+  - `SettingsPanel(QWidget)` — Three QGroupBoxes (Global/TikTok/Facebook); output dir, workers, delay, quality, cookies, scrolls; auto-save on field change
+
+### `gui/_history_helpers.py`
+- **Purpose:** Shared UI utility functions (v1.3)
+- **Functions:**
+  - `format_size(bytes) -> str` — Human-readable file size
+  - `format_date(timestamp) -> str` — Human-readable date
+  - `open_path(path: str)` — Cross-platform file open
+  - `reveal_in_file_manager(path: str)` — Cross-platform Reveal in Explorer/Finder
+
+### `gui/theme.py`
+- **Purpose:** Dark theme bootstrap and live mode switching
+- **Functions:**
+  - `bootstrap(app: QApplication, config: AppConfig)` — Load qdarktheme on startup, start OS listener
+  - `apply(mode: str)` — Switch theme live (system/light/dark)
+
+### `gui/tokens.py`
+- **Purpose:** Semantic color tokens for headless testing
+- **Exports:** 15 color keys (bg_primary, border_subtle, text_muted, accent_primary, etc.)
+
+### `gui/spacing.py`
+- **Purpose:** 8pt grid spacing constants
+- **Constants:** XS (4), SM (8), MD (12), LG (16), XL (24), XXL (32), XXXL (48)
+
+### `gui/icons.py`
+- **Purpose:** qtawesome icon caching
+- **Functions:** `get_icon(name: str, color: str) -> QIcon` with memo cache
 
 ## Error Handling
 
-### Pattern: Try-Except with Logging
+### Pattern: Typed Exceptions + Tenacity Retry
 ```python
-try:
-    result = download_video(url, output_dir)
-except NetworkError as e:
-    logger.error(f"Network error for {url}: {e}")
-    return DownloadResult(url, False, str(e))
-except Exception as e:
-    logger.exception(f"Unexpected error: {e}")
-    raise
+from retry_policy import (
+    LoginRequired, Private, NotFound,
+    RateLimited, TransientFailure, with_retry,
+)
+
+@with_retry(max_attempts=3)
+def _do_download(url, output_dir, ...) -> DownloadResult:
+    try:
+        ydl.download([url])
+    except yt_dlp.utils.DownloadError as e:
+        raise _classify_error(e)  # → typed exception
 ```
 
-### Error Types
-- `NetworkError` — Network failures, TikTok blocking
-- `InvalidURLError` — Malformed or non-TikTok URLs
-- `PermissionError` — Output directory write access denied
-- `DuplicateError` — Video already downloaded (logged, not raised)
+### Error Types (defined in `retry_policy.py`)
+
+**Permanent (no retry):**
+- `LoginRequired` — Login wall detected (FB cookies expired/missing)
+- `Private` — Video private/restricted
+- `NotFound` — HTTP 404 / video removed
+
+**Retryable:**
+- `RateLimited` — HTTP 429; honors `Retry-After` header
+- `TransientFailure` — Connection reset, timeout, fragment errors
+
+**Classification:** `_classify_error()` in `downloader.py` string-matches yt-dlp error messages against `FB_LOGIN_WALL_MARKERS` (config), "HTTP 429", "private", "404", connection/timeout patterns.
+
+**Outer retry** (tenacity) sits above yt-dlp's inner per-fragment retries. Decorrelated jitter base=2.0s, cap=60s.
 
 ## Testing Standards
 

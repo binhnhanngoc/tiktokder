@@ -2,19 +2,20 @@
 
 A Python desktop and CLI tool for batch-downloading videos from TikTok and Facebook without watermarks. Dual interface: PySide6 GUI or CLI with Rich progress UI.
 
-**v1.2.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
+**v1.3.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
 
 ## Features
 
 - **Dual Interface** — Desktop GUI (PySide6) and CLI (Rich + Argparse)
 - **Multi-platform** — TikTok videos and Facebook videos in single batch
 - **Download Modes** — Single URL, batch files, user profiles, Facebook pages
-- **Channel Browsing** — Dedicated **TikTok** and **Facebook** sub-tabs in the GUI, each with independent URL state and a quality column
-- **History Tab** — Browse every downloaded video with rich metadata (title, platform, uploader, quality, size, date, path); filter by platform or live search; right-click to open file, open folder, re-download, copy URL, or remove
+- **Platform-First UI** — Top-level **TikTok** and **Facebook** tabs, each with Channels (saved list) / Queue / Library sub-tabs; persistent global URL bar auto-routes pasted URLs by platform; status bar shows per-platform queue + done badges
+- **Saved Channels** — Save channels/pages with optional nicknames; right-click for `Download all new` (filters out already-downloaded and pre-cutoff videos)
+- **Library View** — Per-platform two-pane: uploader sidebar (★ marks saved channels) on the left, filtered history on the right; right-click rows to open file, open folder, re-download, copy URL, or remove
 - **Quality Selector** — Default Quality setting (`Best`, `1080p`, `720p`, `480p`, `Audio only`) plus optional subtitle (`en`) and thumbnail downloads
 - **Concurrent Downloads** — ThreadPoolExecutor with configurable workers (default: 3)
 - **Per-uploader Folder Layout** — Output organized as `downloads/{platform}/{uploader}/{id}_{title}.{ext}`
-- **Drag-and-drop & Import/Export** — Drop URLs or `.txt` files onto the Download tab; round-trip via Import/Export buttons
+- **Drag-and-drop** — Drop URLs or `.txt` files onto the global URL bar or platform tabs to queue downloads
 - **Duplicate Detection** — Recursive filesystem scan; auto-skip already-downloaded videos (works across the new tree and any legacy flat-root files)
 - **Real-time Progress** — GUI table updates + CLI progress bar with percentages
 - **Rate Limiting** — Configurable inter-request delay to respect platform limits
@@ -36,14 +37,15 @@ python app.py
 ```
 
 GUI tabs:
-- **Download** — single URL bar, queue table, drag-drop URLs or `.txt` files, Import/Export buttons.
-- **Channel / Page** — TikTok sub-tab (yt-dlp flat playlist) and Facebook sub-tab (Playwright scraping). Each preserves URL + table state when switching.
-- **History** — full record list with search, platform filter, stats, right-click actions.
-- **Settings** — output folder, concurrency, delay, cookie browser, default quality, subtitles toggle, thumbnail toggle.
+- **TikTok** — Channels (saved list + browser), Queue (TikTok-only download table), Library (uploader sidebar + filtered history).
+- **Facebook** — same composite for Facebook pages/profiles, with Playwright scraping under the hood. Scrolls spinbox (1–50, default 10) for Playwright scrape budget; "Load more" button to resume.
+- **Settings** — Global / TikTok / Facebook sections (output folder, concurrency, default quality, cookie browser, FB cookies.txt + default scrolls, etc.).
+
+A persistent global URL bar at the top (above tabs) accepts pasted URLs or `.txt` drops; URLs auto-route to the matching platform's queue. The status bar shows per-platform queue counts and total completed downloads.
 
 ### Drag and drop
 
-Drop a TikTok or Facebook URL anywhere on the Download tab to add it to the queue. Drop a `.txt` batch file to import all URLs from it. Invalid URLs are silently dropped (consistent with batch-file parsing).
+Drop a TikTok or Facebook URL on the global URL bar (above tabs) to add it to the queue. Drop a `.txt` batch file to import all URLs from it; mixed-platform files split correctly. You can also drag URLs onto a specific platform tab to load them into that tab's queue. Invalid URLs are silently dropped (consistent with batch-file parsing).
 
 ### Command-line interface (CLI)
 
@@ -91,18 +93,22 @@ python main.py --facebook-page "https://www.facebook.com/pagename"
 
 ## Settings (GUI)
 
-| Setting | Values | Notes |
-|---------|--------|-------|
-| Output Directory | path | per-uploader subfolders are created automatically |
-| Concurrent Downloads | 1–10 | platform-aware pacing applies on top |
-| Delay Between Downloads | 0.0–10.0 s | gaussian jitter applied per platform |
-| Cookie Browser | None / chrome / firefox / edge | TikTok yt-dlp cookies — auto-extracted from your browser |
-| Facebook Cookies File | path to Netscape `cookies.txt` (optional) | lifts the **10-reel cap** on anonymous FB profile scraping. Export with a browser extension like *Get cookies.txt LOCALLY* while logged in to facebook.com, then point here. Use a burner FB account if possible — scraping technically violates FB ToS |
-| Default Quality | `Best`, `1080p`, `720p`, `480p`, `Audio only` | audio-only writes `.m4a` (requires ffmpeg) |
-| Write subtitles (en) | on / off | sidecar `.srt` next to the video |
-| Write thumbnail | on / off | sidecar `.jpg` next to the video |
+Settings are split into three groups: **Global**, **TikTok**, **Facebook**. All settings auto-save and propagate to in-flight engine and UI state on change.
 
-All settings auto-save and propagate to in-flight engine state on change.
+| Group | Setting | Values | Notes |
+|-------|---------|--------|-------|
+| Global | Appearance | System / Light / Dark | applies immediately |
+| Global | Output Directory | path | per-uploader subfolders created automatically |
+| Global | Concurrent Downloads | 1–10 | platform-aware pacing applies on top (TT default 3, FB default 1) |
+| Global | Delay Between Downloads | 0.0–10.0 s | gaussian jitter applied per platform (TT 1.5s, FB 3.0s mean) |
+| Global | Default Quality | Best / 1080p / 720p / 480p / Audio only | audio-only requires ffmpeg; writes `.m4a` |
+| Global | Write subtitles (en) | on / off | sidecar `.srt` next to video |
+| Global | Write thumbnail | on / off | sidecar `.jpg` next to video |
+| TikTok | Cookie Browser | None / chrome / firefox / edge | auto-extracts session cookies from your browser |
+| Facebook | Cookies File | path to Netscape `cookies.txt` | optional; lifts **10-reel cap** on anon profile scraping. Export via *Get cookies.txt LOCALLY* extension while logged in |
+| Facebook | Default Max Scrolls | 1–50 | Playwright scroll budget in Channels/Browser sub-tab |
+
+
 
 ## Output
 

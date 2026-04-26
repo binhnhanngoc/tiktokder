@@ -3,9 +3,9 @@
 ## Project Definition
 
 **Name:** TikTok & Facebook Batch Video Downloader
-**Version:** 1.1.0
-**Status:** Stable (Multi-platform support, Facebook integration complete)
-**Last Updated:** 2026-03-22
+**Version:** 1.3.0
+**Status:** Stable (Platform-first UI restructure with persistent state and saved channels)
+**Last Updated:** 2026-04-26
 
 ## Executive Summary
 
@@ -43,18 +43,36 @@ Dual-interface Python application for batch-downloading TikTok and Facebook vide
 - **`main.py`** — CLI entry point with argparse handler
 
 ### Core Modules
-- **`url_parser.py`** — URL validation, channel detection, batch file parsing
-- **`downloader.py`** — yt-dlp wrapper, concurrent execution, progress hooks
-- **`channel_fetcher.py`** — TikTok channel metadata and video list retrieval
-- **`download_engine.py`** — Unified download orchestration for GUI and CLI
-- **`config.py`** — JSON-based settings persistence (~/.tiktokder/config.json)
+- **`url_parser.py`** — URL validation, platform detection, channel detection, batch file parsing
+- **`downloader.py`** — yt-dlp wrapper, concurrent execution, platform-aware jitter, quality profiles
+- **`download_engine.py`** — Unified download orchestration for GUI & CLI; QThread-based; queue dedup & history integration
+- **`channel_fetcher.py`** — TikTok channel metadata and video list retrieval via yt-dlp flat-playlist
+- **`facebook_fetcher.py`** — Playwright-based Facebook page scraping (headless Chromium; cookies.txt injection to lift 10-reel anon cap)
+- **`facebook_resolver.py`** — Pre-resolve fb.watch shortlinks to fast-fail login walls (curl_cffi)
+- **`config.py`** — AppConfig + PlatformDefaults; ~/ .tiktokder/config.json persistence
+- **`app_state.py`** — AppState dataclass (active tab, browser state snapshots, queue) → data/state.json
+- **`saved_channels_store.py`** — SavedChannel + Store CRUD; platform-scoped bookmarks; "Download all new" filters
+- **`history_store.py`** — v1→v2 schema migration; FIFO cap; atomic write; HistoryRecord per download
+- **`path_builder.py`** — platform/uploader-aware path building + slug normalization
+- **`retry_policy.py`** — Tenacity decorators + typed exceptions (LoginRequired, RateLimited, etc.)
 
-### GUI Package (`gui/`)
-- **`main_window.py`** — Main application window with tab interface
-- **`url_input_panel.py`** — URL input and single-download controls
-- **`download_table.py`** — Download queue and progress display
-- **`channel_browser.py`** — Channel discovery and browsing interface
-- **`settings_panel.py`** — Application configuration (output dir, workers, delay)
+### GUI Package (`gui/`) — v1.3.0 Restructure
+- **`main_window.py`** — Main window with global URL bar + QTabWidget (TikTok / Facebook / Settings)
+- **`global_url_bar.py`** — Persistent URL input above tabs; drag-drop `.txt` files and URLs
+- **`platform_tab.py`** — Per-platform composite widget with 3 sub-tabs (Channels / Queue / Library)
+- **`saved_channels_panel.py`** — Saved channels list with browser embedded; "Download all new" feature
+- **`library_panel.py`** — Two-pane uploader sidebar + filtered history table; per-platform scoped
+- **`download_table.py`** — Queue sub-tab table; real-time status/progress/size columns
+- **`base_browser_panel.py`** — Shared base for TikTok/Facebook browser panels
+- **`tiktok_browser_panel.py`** — TikTok channel browser via ChannelFetcher
+- **`facebook_browser_panel.py`** — Facebook page browser via FacebookFetcher; Scrolls spinbox + "Load more"
+- **`status_bar_widget.py`** — Status bar badges: TT/FB/Done counts + free-text status
+- **`settings_panel.py`** — Settings tab with Global / TikTok / Facebook QGroupBox sections
+- **`_history_helpers.py`** — Utility funcs: `format_size`, `format_date`, `open_path`, `reveal_in_file_manager`
+- **`theme.py`** — Bootstrap dark theme + OS dark-mode listener; Accent #4F46E5
+- **`tokens.py`** — 15 semantic color keys (headless-testable)
+- **`spacing.py`** — 8pt grid spacing constants (XS–XXXL)
+- **`icons.py`** — qtawesome icon memo cache
 
 ### Data Flow (GUI)
 ```
@@ -128,7 +146,7 @@ Options:
 
 ## Success Criteria
 
-- [x] All 104+ unit tests pass
+- [x] All 326+ unit tests pass
 - [x] Single video downloads without watermark (TikTok & Facebook, GUI & CLI)
 - [x] Batch file processing with mixed-platform support
 - [x] TikTok profile and Facebook page scraping capability
@@ -136,10 +154,13 @@ Options:
 - [x] Automatic skip of previously downloaded videos (cross-platform)
 - [x] Platform detection (TikTok vs. Facebook) automatic
 - [x] CLI accepts all required arguments with validation
-- [x] Desktop GUI with 3 tabs: URL Input, Channel/Page Browser, Settings
-- [x] Real-time download table with status, progress %, file size
-- [x] Channel/page discovery and batch selection via GUI
-- [x] Settings persisted to ~/.tiktokder/config.json
+- [x] Desktop GUI with platform-first tabs (TikTok / Facebook / Settings); each platform has Channels / Queue / Library sub-tabs
+- [x] Global URL bar with drag-drop `.txt` and URL support; auto-routes by platform
+- [x] Per-platform Library with uploader sidebar + filtered history; right-click actions (open/reveal/re-download/remove)
+- [x] Saved Channels management: CRUD, "Download all new" (filters cached videos), starred/nicknames
+- [x] Persistent UI state: active tab, browser scrollback, queue snapshot → data/state.json
+- [x] Settings persisted to ~/.tiktokder/config.json with auto-sync on field change
+- [x] Facebook browser with Scrolls spinbox (1–50) and "Load more" button for Playwright scrape resumption
 - [x] User-friendly error dialogs and CLI messages
 
 ## Known Limitations

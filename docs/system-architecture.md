@@ -44,44 +44,54 @@ TikTokDer is a dual-interface (GUI + CLI) application for batch-downloading vide
 
 ### 1. User Interface Layer
 
-#### GUI (PySide6)
-- **Entry Point:** `app.py`
-- **Main Window:** `gui/main_window.py` (QMainWindow with QTabWidget)
-- **Tabs:**
-  1. **URL Input Panel** (`gui/url_input_panel.py`)
-     - Input field for single TikTok URLs
-     - Download button triggering `download_engine`
-     - Status label showing operation feedback
-  2. **Channel Browser** (`gui/channel_browser.py`)
-     - Channel name search field
-     - Video list table populated by `channel_fetcher`
-     - Batch download of selected videos
-  3. **Settings Panel** (`gui/settings_panel.py`)
-     - Output directory picker
-     - Workers spinbox (1-10)
-     - Delay spinbox (0.1-10.0 seconds)
-     - Save button persisting to config.json
+#### GUI (PySide6) — v1.3.0 Platform-First Restructure
+- **Entry Point:** `app.py` → `MainWindow`
+- **Top-level Layout:**
+  1. **GlobalUrlBar** (`gui/global_url_bar.py`) — Persistent QLineEdit + Add button above tabs; drag-drop `.txt` and URLs; emits `urls_submitted(list[str])`
+  2. **QTabWidget** (3 tabs):
+     - **TikTok Tab** → `PlatformTab(platform="tiktok")`
+     - **Facebook Tab** → `PlatformTab(platform="facebook")`
+     - **Settings Tab** → `SettingsPanel`
+  3. **StatusBarWidget** (`gui/status_bar_widget.py`) — Labels: TT: N | FB: N | Done: N | free-text status
 
-- **Download Progress Display** (`gui/download_table.py`)
-  - QTableWidget showing all downloads
-  - Columns: Video ID, Title, Status, Progress %, Size
-  - Real-time updates via `download_engine` callbacks
+- **PlatformTab Composite** (`gui/platform_tab.py`) — Three sub-tabs per platform:
+  1. **Channels Sub-tab** (`gui/saved_channels_panel.py`)
+     - Saved channels table (nickname, URL, video count, last-fetched relative time)
+     - Embedded browser panel below (TikTokBrowserPanel or FacebookBrowserPanel)
+     - Toolbar: Add, Refresh All; right-click: Browse, Refresh, Download all new (confirm >10), Rename+notes, Edit URL, Star, Remove
+  2. **Queue Sub-tab** (`gui/download_table.py`)
+     - Download queue table per platform (URL, Title, Status, Progress %, File path)
+     - Toolbar: Clear Completed, Clear All, Retry Failed, Cancel All
+     - Right-click: Open file, Reveal, Copy URL, Retry, Force Download, Clear row
+  3. **Library Sub-tab** (`gui/library_panel.py`)
+     - Two-pane: left uploader sidebar (frequency-sorted, ★ for saved channels), right history table
+     - Right-click: Open file, Reveal folder, Re-download, Copy URL, Remove from history
+     - Search box (200ms debounce), stats label
 
-**GUI Data Flow:**
+- **Browser Panels** (`gui/base_browser_panel.py`, `gui/tiktok_browser_panel.py`, `gui/facebook_browser_panel.py`)
+  - Embedded in Channels sub-tab above table
+  - URL input + Browse button, video table, Select All/Deselect/Download Selected
+  - TikTok: ChannelFetcher integration
+  - Facebook: FacebookFetcher + Scrolls spinbox (1–50, default 10) + "Load more" button
+  - State snapshots restored on app relaunch
+
+**GUI Data Flow (v1.3):**
 ```
-User Input (URL, Channel, Settings)
+GlobalUrlBar drag-drop or paste URL / .txt file
     ↓
-URL Input Panel / Channel/Page Browser / Settings Panel
+MainWindow._on_urls_submitted() [platform detection]
     ↓
-download_engine.add_urls() + download_engine.start_downloads()
+Route to platform tab: PlatformTab.add_urls() or .queue_panel
     ↓
-[Auto-detect platform: TikTok or Facebook]
+download_engine.add_urls() + .start_downloads() [QThread]
     ↓
-Progress Callback (thread-safe for GUI updates)
+DownloadEngine emits progress signals → DownloadTableWidget updates
     ↓
-Download Table Widget (real-time status, progress %, file size)
+Per-platform queue displays real-time status/progress/size
     ↓
-Status Label (completion notification)
+Engine.history_changed → tiktok_tab.library_panel.refresh() + facebook_tab.library_panel.refresh()
+    ↓
+[Parallel] SavedChannelsPanel can load URL → browser panel (embedded) → user selects → Download Selected → engine queue
 ```
 
 #### CLI (Rich + Argparse)
@@ -306,8 +316,8 @@ save_config(config: AppConfig) -> None
 
 #### Local Filesystem
 - **Video Storage:** `./downloads/` (configurable via UI/CLI)
-- **File Naming:** `{video_id}_{title}.mp4`
-- **Duplicate Detection:** Based on filename scan (video_id extraction)
+- **File Naming:** `{video_id}_{title}.mp4` (platform-aware tree: `/tiktok/{uploader}/` or `/facebook/{uploader}/`)
+- **Duplicate Detection:** Filesystem scan + history dedup check
 
 #### Configuration File
 - **Location:** `~/.tiktokder/config.json`
@@ -328,6 +338,36 @@ save_config(config: AppConfig) -> None
   "window_y": 100
 }
 ```
+
+#### UI State (v1.3.0)
+- **Location:** `data/state.json`
+- **Owner:** `app_state.py` (AppState dataclass)
+- **Restored on relaunch** by `app.py` and `MainWindow.__init__()`
+- **Contains:** Active tab index, channel_active_sub_tab per platform, download_queue snapshot, browser panel state (scrollback, selected channel), full state tolerance (malformed JSON → empty defaults)
+
+**Example state.json:**
+```json
+{
+  "active_tab_index": 0,
+  "channel_active_sub_tab": {"tiktok": "channels", "facebook": "library"},
+  "download_queue": [{"url": "...", "title": "...", "status": "queued"}],
+  "tiktok_browser": {"url": "...", "scroll_position": 1500},
+  "facebook_browser": {"url": "...", "scroll_position": 2000}
+}
+```
+
+#### History Records (schema v2)
+- **Location:** `data/history.json`
+- **Owner:** `history_store.py` (v1→v2 migration on first write)
+- **FIFO cap:** 10,000 entries; trim oldest metadata (video files untouched)
+- **Fields per record:** platform, uploader, video_id, title, quality, size, downloaded_at, file_path
+
+#### Saved Channels (v1.3.0)
+- **Location:** `data/saved_channels.json`
+- **Owner:** `saved_channels_store.py` (SavedChannelsStore)
+- **Scoped:** Per-platform (tiktok, facebook), max 200 each
+- **Fields per channel:** url, nickname, note, starred, last_fetched_at, last_fetched_video_ids (for dedup)
+- **FIFO trim:** Oldest entries removed if platform cap exceeded
 
 ## Data Flow Diagrams
 
@@ -387,29 +427,46 @@ Batch completes
 Print summary: "Downloaded 8/10, Failed 1, Skipped 1"
 ```
 
-### Channel/Page Browse & Download (GUI)
+### Channel/Page Browse & Download (GUI — v1.3)
 ```
-User enters TikTok channel or Facebook page name
+User enters TikTok channel URL or Facebook page URL in browser panel (Channels sub-tab)
     ↓
-Click "Search Channel" button
+Click "Browse" button
     ↓
-channel_browser.on_search_clicked()
+[Auto-detect platform via url_parser.detect_platform()]
+    ├─ TikTok: TikTokBrowserPanel → ChannelFetcher.get_channel_videos()
+    └─ Facebook: FacebookBrowserPanel → FacebookFetcher.scrape_facebook_page()
     ↓
-[Auto-detect platform via URL pattern]
-    ├─ TikTok: channel_fetcher.get_channel_videos("@channel")
-    └─ Facebook: facebook_fetcher.scrape_facebook_page("facebook.com/page")
+Browser panel fetches & populates table (checkbox / title / duration / quality / views / date)
     ↓
-Populate table with video list (ID, title, description)
+User checks videos, clicks "Download Selected"
     ↓
-User selects 5 videos and clicks "Download Selected"
+MainWindow routes to platform engine → download_engine.add_urls()
     ↓
-Collect URLs from selected rows
+download_engine.start_downloads() [QThread spawned]
     ↓
-download_engine.add_urls(urls)
+Progress → DownloadTableWidget (Queue sub-tab) updates in real-time
     ↓
-download_engine.start_downloads() [thread spawned]
+Completion → history_store writes records → both library panels refresh
+```
+
+### Download All New (Saved Channels — v1.3)
+```
+User navigates to Channels sub-tab → clicks "Download all new" on saved channel row
     ↓
-[Same as single video flow, but with 5 videos in parallel]
+SavedChannelsPanel._on_download_all_new(channel: SavedChannel)
+    ↓
+Call saved_channels_store.select_new_videos(channel.url) [dedup filter]
+    ↓
+→ Returns videos NOT in engine._queued_urls AND NOT in history_ids_resolver AND newer than channel.last_fetched_at
+    ↓
+If >10 videos, show confirm dialog (counts matching, cached, new)
+    ↓
+MainWindow → download_engine.add_urls(new_video_urls)
+    ↓
+Update channel.last_fetched_at + last_fetched_video_ids atomically
+    ↓
+Engine downloads; history_store writes → library panels refresh (filter shows new records)
 ```
 
 ## Concurrency Model

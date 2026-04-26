@@ -4,20 +4,30 @@
 
 TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloading TikTok and Facebook videos without watermarks. Organized into three layers: user interface (PySide6 GUI, Rich CLI), shared business logic, and external dependencies (yt-dlp, Playwright).
 
-**Current Statistics (v1.2.0):**
-- **Total Python Modules:** 22 (8 core + 1 CLI + 1 GUI + 9 GUI components + 3 extras)
-- **Test Coverage:** 257 tests across 7 test files
+**Current Statistics (v1.3.0):**
+- **Total Python Modules:** ~28 (core + GUI components + new v1.3 modules)
+- **Total LOC:** ~5350 (root: ~2650, GUI: ~2700)
+- **Test Coverage:** 326+ tests across 4 test files
 - **Python Version:** 3.10+
-- **External Dependencies:** 6 (yt-dlp, PySide6, Rich, pytest, PyInstaller, Playwright)
+- **External Dependencies:** 8+ (yt-dlp, PySide6, Rich, pytest, PyInstaller, Playwright, tenacity, curl_cffi, qtawesome, pyqtdarktheme, darkdetect)
+
+### v1.3.0 additions (platform-first UI restructure)
+- `saved_channels_store.py` — schema-v1 saved-channels persistence (`data/saved_channels.json`); CRUD, atomic write, tolerant load, cap-200/platform with FIFO trim, `select_new_videos` filter for "Download all new". 19 tests.
+- `gui/platform_tab.py` — composite per-platform widget hosting Channels / Queue / Library sub-tabs; drag-drop filtered to own platform.
+- `gui/saved_channels_panel.py` — saved-channel list + browser-below for one platform; right-click CRUD, "Download all new" with confirm dialog (>10 videos).
+- `gui/library_panel.py` — two-pane Library (uploader sidebar + filtered history table); ★ marks uploaders with saved channels; right-click open/folder/redownload/copy/remove.
+- `gui/global_url_bar.py` — persistent URL bar above tabs, drag-drop + paste; auto-routes by `detect_platform`.
+- `gui/status_bar_widget.py` — TT/FB/Done/free-text badges in status bar.
+- `gui/_history_helpers.py` — extracted `format_size`, `format_date`, `open_path`, `reveal_in_file_manager` from legacy `history_tab.py`.
+
+### v1.3.0 removals
+- `gui/channel_browser.py`, `gui/download_tab.py`, `gui/history_tab.py`, `gui/url_input_panel.py` — superseded by platform tabs + global URL bar + library panel.
 
 ### v1.2.0 additions
-- `app_state.py` — UI state persistence (Download queue + Channel/Page browse snapshots) in `data/state.json`. Loaded by `app.py` on launch, restored by `MainWindow._restore_state`, captured by `MainWindow.snapshot_state` on close. Tolerant load (malformed/missing/unknown fields → defaults). 14 tests in `test_app_state.py`.
+- `app_state.py` — UI state persistence (Download queue + Channel/Page browse snapshots) in `data/state.json`. Tolerant load.
 - `history_store.py` — schema-v2 history persistence with v1 auto-migration, atomic writes, FIFO cap.
 - `path_builder.py` — pure helpers for slugify + platform/uploader-aware yt-dlp `outtmpl`.
-- `gui/history_tab.py` — 4th top-level tab with rich record list, search, platform filter, stats, context menu.
-- `gui/download_tab.py` — wraps URL input + queue table; owns drag-drop + Import/Export.
-- `gui/base_browser_panel.py`, `gui/tiktok_browser_panel.py`, `gui/facebook_browser_panel.py` — replaces monolithic `channel_browser.py` with a thin `QTabWidget` wrapper + per-platform sub-panels.
-- `test_history_records.py`, `test_path_builder.py`, `test_engine_history_integration.py` — ~50 new tests.
+- `gui/base_browser_panel.py`, `gui/tiktok_browser_panel.py`, `gui/facebook_browser_panel.py` — per-platform sub-panels.
 
 ## Module Inventory
 
@@ -159,38 +169,27 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
   - Manages window geometry persistence
   - Coordinates between tabs and download engine
 
-**Tabs (v1.2.0):**
-1. **Download** — `DownloadTab` wrapper (URL input + queue table + drag-drop + Import/Export)
-2. **Channel / Page** — `ChannelBrowser` (QTabWidget with TikTok and Facebook sub-panels, each with own URL input + Quality column)
-3. **History** — `HistoryTab` (rich-record list with search, platform filter, stats, right-click actions)
-4. **Settings** — `SettingsPanel` (now also: Default Quality combo, Write subtitles toggle, Write thumbnail toggle)
+**Tabs (v1.3.0):**
+1. **TikTok** — `PlatformTab(platform="tiktok")` with Channels (`SavedChannelsPanel` + `TikTokBrowserPanel`) / Queue (`DownloadTableWidget`) / Library (`LibraryPanel`) sub-tabs.
+2. **Facebook** — `PlatformTab(platform="facebook")` with the same composite, FB browser panel inside Channels.
+3. **Settings** — `SettingsPanel` with Global / TikTok / Facebook QGroupBoxes.
 
-#### 10. `gui/url_input_panel.py`
-**Purpose:** Single URL input and download controls
-**Key Class:**
-- `UrlInputPanel(QWidget)` — Provides:
-  - QLineEdit for URL input (TikTok or Facebook)
-  - QPushButton for download action
-  - QLabel for status display
-  - Integration with `download_engine`
-  - Detects channels via `is_channel_url()` and routes appropriately
+A persistent `GlobalUrlBar` sits above the tab widget; a `StatusBarWidget` shows per-platform queue + done badges in the QMainWindow status bar.
+
+#### 10. `gui/global_url_bar.py`
+**Purpose:** Persistent URL bar above all tabs.
+**Key Class:** `GlobalUrlBar(QWidget)` — QLineEdit + Add button, drag-drop, validates and emits `urls_submitted: list[str]` (mixed-platform). MainWindow groups by `detect_platform` and dispatches.
 
 #### 11. `gui/download_table.py`
-**Purpose:** Real-time download queue and progress display
-**Key Class:**
-- `DownloadTable(QTableWidget)` — Displays:
-  - Video ID, Title, Status, Progress (%), Size
-  - Updates from download_engine progress callbacks
-  - Supports selection and clearing
+**Purpose:** Per-platform download queue table (one instance per `PlatformTab.queue_panel`).
+**Key Class:** `DownloadTableWidget(QWidget)` — Title / Status / Progress / Size columns; right-click for Open/Copy/Retry/Force; toolbar with Clear Completed / Clear All / Retry Failed / Cancel All.
 
-#### 12. `gui/channel_browser.py`
-**Purpose:** Channel/page discovery and video browsing interface
-**Key Class:**
-- `ChannelBrowser(QWidget)` — Provides:
-  - QLineEdit for TikTok channel or Facebook page name input
-  - "Search Channel" button triggering `channel_fetcher` or `facebook_fetcher`
-  - QTableWidget displaying video list
-  - "Download Selected" button for batch queuing
+#### 12. `gui/platform_tab.py` + `gui/saved_channels_panel.py` + `gui/library_panel.py`
+**Purpose:** Composite per-platform widget and its sub-panels.
+**Key Classes:**
+- `PlatformTab(platform, browser_panel, store, store_path)` — three-sub-tab QTabWidget (Channels / Queue / Library); drag-drop filtered to own platform.
+- `SavedChannelsPanel` — saved-channel list above an injected browser panel; right-click for Browse/Refresh, Download all new (confirm dialog >10), Rename + notes, Edit URL, Star/Unstar, Remove.
+- `LibraryPanel` — two-pane uploader sidebar + filtered history table; ★ marks uploaders with saved channels; right-click for Open file / Open folder / Re-download / Copy URL / Remove.
 
 #### 13. `gui/settings_panel.py`
 **Purpose:** Application configuration interface
@@ -225,21 +224,28 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 ```
 app.py
 ├── PySide6.QtWidgets
-│   └── config.py (load_config)
+│   └── config.py (load_config, AppConfig)
 │   └── gui/main_window.py
-│       ├── gui/url_input_panel.py
-│       │   ├── url_parser.py (validate_tiktok_url, is_channel_url)
-│       │   └── download_engine.py
-│       │       └── downloader.py
-│       │           └── yt-dlp
-│       ├── gui/download_table.py
-│       ├── gui/channel_browser.py
-│       │   ├── channel_fetcher.py
-│       │   │   └── yt-dlp
-│       │   └── download_engine.py
+│       ├── gui/global_url_bar.py
+│       │   └── url_parser.py (validate_url, detect_platform, read_batch_file)
+│       ├── gui/status_bar_widget.py
+│       ├── gui/platform_tab.py
+│       │   ├── gui/saved_channels_panel.py
+│       │   │   ├── saved_channels_store.py
+│       │   │   └── url_parser.py
+│       │   ├── gui/download_table.py
+│       │   └── gui/library_panel.py
+│       │       ├── gui/_history_helpers.py
+│       │       └── history_store.py
+│       ├── gui/tiktok_browser_panel.py / gui/facebook_browser_panel.py
+│       │   ├── channel_fetcher.py / facebook_fetcher.py
+│       │   │   └── yt-dlp / Playwright
+│       │   └── gui/base_browser_panel.py
+│       ├── download_engine.py
+│       │   └── downloader.py
+│       │       └── yt-dlp
 │       └── gui/settings_panel.py
-│           ├── config.py
-│           └── pathlib.Path
+│           └── config.py
 
 main.py
 ├── argparse
@@ -308,18 +314,20 @@ for video in videos:
     print(f"{video['video_id']}: {video['title']}")
 ```
 
-## Key Improvements (v1.1.0)
+## Key Improvements (v1.3.0)
 
-1. **Facebook Support** — Multi-platform downloads with automatic detection
-2. **Playwright Integration** — Headless browser-based Facebook page scraping
-3. **PySide6 Desktop GUI** — Full graphical interface with 3 tabs
-4. **Channel/Page Browser** — Discover and download from TikTok channels or Facebook pages
-5. **Configuration UI** — Settings panel for output dir, workers, delay
-6. **Progress Hooks** — Real-time callbacks for GUI progress updates
-7. **download_engine.py** — Unified orchestration for GUI and CLI
-8. **Test Expansion** — 104+ tests covering all modules
-9. **Mixed-platform Batches** — Single batch file with TikTok and Facebook URLs
-10. **JSON Config** — Persistent settings in ~/.tiktokder/config.json
+1. **Platform-First UI Restructure** — Top-level TikTok / Facebook tabs, each with Channels / Queue / Library sub-tabs; centralizes per-platform workflows
+2. **Global URL Bar** — Persistent drag-drop + paste above tabs; auto-routes URLs by platform; supports `.txt` batch import
+3. **Saved Channels Management** — CRUD bookmarks with starred/nicknames; "Download all new" filters cached videos against download history + timestamp cutoff
+4. **UI State Persistence** — `AppState` snapshots active tab, browser scrollback, queue onto `data/state.json`; restores on relaunch (Tier-1 UX improvement)
+5. **Enhanced Library Panel** — Two-pane uploader sidebar (frequency-sorted, ★ for saved) + right-pane history table with search; right-click (Open/Reveal/Re-download/Copy URL/Remove)
+6. **Facebook Cookies Injection** — yt-dlp + Playwright both accept `cookies.txt` (Netscape format) to lift anonymous 10-reel scrape cap
+7. **Dark Theme Bootstrap** — OS dark-mode listener + pyqtdarktheme integration (Accent #4F46E5); live theme swap via Settings
+8. **Per-Platform Browser Panels** — BaseBrowserPanel base + TikTokBrowserPanel (ChannelFetcher) + FacebookBrowserPanel (FacebookFetcher + Scrolls spinbox + "Load more"); state snapshots per tab
+9. **Tenacity Retry Layer** — Typed exceptions (LoginRequired, RateLimited, Private, NotFound) + Retry-After awareness; curl_cffi pre-resolver for fb.watch → fast-fail login walls
+10. **Test Expansion** — 326+ tests; new test files for app_state, saved_channels_store, retry_policy, facebook_resolver
+11. **Status Bar Badges** — Per-platform queue counts (TT / FB / Done) + free-text status indicator
+12. **Modular UI Components** — _history_helpers.py, tokens.py, spacing.py, icons.py for reusable design system
 
 ## Known Limitations
 
