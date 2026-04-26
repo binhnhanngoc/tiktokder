@@ -33,6 +33,8 @@ from downloader import (
     get_ydl_opts,
     get_downloaded_ids,
     DownloadResult,
+    _classify_error,
+    _jittered_sleep,
 )
 from main import parse_args
 
@@ -611,8 +613,9 @@ class TestParseArgs:
             assert args.user is None
             assert args.facebook_page is None
             assert args.output == "./downloads"
-            assert args.workers == 3
-            assert args.delay == 1.0
+            # workers/delay default to None so main() can fall back to per-platform presets.
+            assert args.workers is None
+            assert args.delay is None
 
     def test_parse_args_single_url(self):
         """Test parsing single URL argument."""
@@ -735,6 +738,88 @@ class TestMainValidation:
                     from main import main
                     main()
                 assert exc_info.value.code == 1
+
+
+class TestJitteredSleep:
+    """Verify gaussian jitter helper respects floor and centers on mean."""
+
+    def test_respects_floor_with_seeded_rng(self):
+        import random
+
+        rng = random.Random(42)
+        # Pull a sample manually to confirm clamp wouldn't kick in for these params.
+        for _ in range(50):
+            with patch("downloader.time.sleep") as mock_sleep:
+                _jittered_sleep(0.5, 0.1, 0.2, rng=rng)
+                slept = mock_sleep.call_args[0][0]
+                assert slept >= 0.2
+
+    def test_clamp_when_gauss_negative(self):
+        """Even if gauss produces a tiny/negative value, sleep gets the floor."""
+        import random
+
+        rng = random.Random(0)
+        with patch("downloader.time.sleep") as mock_sleep:
+            _jittered_sleep(mean=0.0, std=10.0, floor=0.5, rng=rng)
+            slept = mock_sleep.call_args[0][0]
+            assert slept >= 0.5
+
+    def test_distribution_centered_on_mean(self):
+        """Mean of 1000 samples should be within tolerance of mu (no floor clamp triggered)."""
+        import random
+
+        rng = random.Random(123)
+        samples = []
+        with patch("downloader.time.sleep") as mock_sleep:
+            for _ in range(1000):
+                _jittered_sleep(2.0, 0.3, 0.1, rng=rng)
+                samples.append(mock_sleep.call_args[0][0])
+        avg = sum(samples) / len(samples)
+        # Loose tolerance — 1000 samples with sigma 0.3 → SE of mean ≈ 0.01
+        assert abs(avg - 2.0) < 0.1
+
+
+class TestClassifyError:
+    """Map yt-dlp/HTTP error messages to ErrorKind strings."""
+
+    def test_login_form_marker(self):
+        assert _classify_error(Exception('id="login_form"')) == "login_required"
+
+    def test_login_button_marker(self):
+        assert _classify_error(Exception('id="loginbutton"')) == "login_required"
+
+    def test_must_log_in_marker(self):
+        assert _classify_error(Exception("You must log in to continue")) == "login_required"
+
+    def test_login_required_phrase(self):
+        assert _classify_error(Exception("Login required to view")) == "login_required"
+
+    def test_private_message(self):
+        assert _classify_error(Exception("This video is private")) == "private"
+
+    def test_video_unavailable(self):
+        assert _classify_error(Exception("Video unavailable")) == "not_found"
+
+    def test_404_marker(self):
+        assert _classify_error(Exception("Got HTTP 404")) == "not_found"
+
+    def test_rate_limit_429(self):
+        assert _classify_error(Exception("HTTP Error 429: Too Many Requests")) == "rate_limited"
+
+    def test_rate_limit_phrase(self):
+        assert _classify_error(Exception("rate limit exceeded")) == "rate_limited"
+
+    def test_server_5xx(self):
+        assert _classify_error(Exception("HTTP Error 503: Service Unavailable")) == "transient"
+
+    def test_timeout(self):
+        assert _classify_error(Exception("Read timeout occurred")) == "transient"
+
+    def test_connection_reset(self):
+        assert _classify_error(Exception("Connection reset by peer")) == "transient"
+
+    def test_unknown_fallback(self):
+        assert _classify_error(Exception("Some completely novel error")) == "unknown"
 
 
 if __name__ == "__main__":

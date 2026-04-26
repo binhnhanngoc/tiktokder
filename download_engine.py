@@ -1,8 +1,10 @@
 """QThread-based download engine with Qt signals for GUI progress updates."""
 
+import random
+
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
-from config import load_history, save_history
+from config import load_history, save_history, get_platform_defaults
 from downloader import download_video, DownloadResult
 from url_parser import extract_video_id, detect_platform
 
@@ -68,12 +70,16 @@ class DownloadEngine(QObject):
         max_workers: int = 3,
         delay: float = 1.0,
         cookie_browser: str | None = None,
+        delay_std: float = 0.3,
+        delay_floor: float = 0.2,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.output_dir = output_dir
         self.max_workers = max_workers
         self.delay = delay
+        self.delay_std = delay_std
+        self.delay_floor = delay_floor
         self.cookie_browser = cookie_browser
         self._queue: list[str] = []
         self._active: dict[str, DownloadWorker] = {}
@@ -134,12 +140,18 @@ class DownloadEngine(QObject):
         self.queue_updated.emit(len(self._queue))
 
         # Delay only applies between finishing one download and starting next replacement
-        # This prevents TikTok rate-limiting, not slowing parallel downloads
+        # This prevents TikTok rate-limiting, not slowing parallel downloads.
+        # Platform-aware gaussian jitter: pick params from the *next* URL when known.
         if self._queue:
-            if self.delay > 0:
-                QTimer.singleShot(int(self.delay * 1000), self._start_next)
-            else:
-                self._start_next()
+            next_url = self._queue[0]
+            defaults = get_platform_defaults(next_url)
+            # User-set self.delay overrides the per-platform mean only when explicitly set;
+            # treat 1.0 (current default sentinel) and any positive value as user intent.
+            mean = self.delay if self.delay > 0 else defaults.delay_mean
+            std = self.delay_std if self.delay_std > 0 else defaults.delay_std
+            floor = self.delay_floor if self.delay_floor > 0 else defaults.delay_floor
+            sample = max(floor, random.gauss(mean, std))
+            QTimer.singleShot(int(sample * 1000), self._start_next)
         elif not self._active:
             self.all_finished.emit()
 

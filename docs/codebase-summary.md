@@ -29,15 +29,16 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 #### 2. `downloader.py`
 **Purpose:** yt-dlp wrapper and concurrent download orchestration
 **Key Exports:**
-- `get_ydl_opts(output_dir: str) -> dict` — Builds yt-dlp configuration
-- `download_video(url: str, output_dir: str, progress_hook: Callable | None = None) -> DownloadResult` — Downloads single video (now with optional progress hook)
-- `download_batch(urls: list[str], output_dir: str, workers: int = 3, delay: float = 1.0, progress_callback: Callable | None = None) -> list[DownloadResult]` — Concurrent downloads via ThreadPoolExecutor
-- `get_downloaded_ids(output_dir: str) -> set[str]` — Scans output directory for already-downloaded video IDs
+- `get_ydl_opts(output_dir, cookie_browser=None, retries=10) -> dict` — Builds yt-dlp configuration with platform-aware retries, `extractor_retries`, `fragment_retries`, `sleep_interval(_requests)`, and per-layer `retry_sleep_functions`
+- `download_video(url, output_dir, progress_hook=None, cookie_browser=None, retries=None, max_attempts=None) -> DownloadResult` — Wraps inner `_do_download` with tenacity outer retry; raises typed exceptions internally, returns `DownloadResult` to callers
+- `download_batch(urls, output_dir, workers=3, delay=1.0, skip_ids=None, delay_std=None, delay_floor=None) -> list[DownloadResult]` — Concurrent downloads with gaussian-jittered, per-platform pacing
+- `get_downloaded_ids(output_dir) -> set[str]` — Scans output for already-downloaded video IDs
+- Internal helpers: `_jittered_sleep`, `_classify_error`, `_kind_to_exception`, `_exception_to_kind`, `_friendly_error`, `_do_download`
 
 **Key Classes:**
-- `DownloadResult(namedtuple)` — (url, success, message, filename, size)
+- `DownloadResult` (dataclass) — `url`, `success`, `video_id`, `title`, `error`, `skipped`. `error` is now a typed kind string (`"login_required"`, `"rate_limited"`, etc.) for known classes, raw message otherwise.
 
-**Test Coverage:** `test_tiktokder.py` (20+ tests)
+**Test Coverage:** `test_tiktokder.py` (35+ tests)
 
 #### 3. `download_engine.py`
 **Purpose:** Unified download orchestration for both GUI and CLI
@@ -76,21 +77,44 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 **Notes:** Headless browser required; may trigger rate limiting
 
 #### 6. `config.py`
-**Purpose:** Application settings persistence and management
+**Purpose:** Application settings persistence and per-platform resilience presets
 **Key Exports:**
-- `AppConfig` (dataclass) with fields:
-  - `output_dir: str` — Downloads directory path
-  - `workers: int` — Concurrent download threads (1-10)
-  - `delay: float` — Seconds between requests for rate limiting
-  - `cookie_browser: str | None` — Browser for cookie extraction (unused currently)
-  - `window_width`, `window_height`, `window_x`, `window_y: int` — GUI window geometry
-- `load_config() -> AppConfig` — Load from `~/.tiktokder/config.json` with defaults
-- `save_config(config: AppConfig) -> None` — Persist to JSON file
-- Constants: `CONFIG_DIR`, `CONFIG_PATH`, `HISTORY_PATH`
+- `AppConfig` (dataclass) — output_dir, workers, delay, cookie_browser, window geometry
+- `PlatformDefaults` (frozen dataclass) — `delay_mean`, `delay_std`, `delay_floor`, `workers`, `retries`
+- Module constants:
+  - `TIKTOK_DEFAULTS = PlatformDefaults(1.5, 0.5, 0.2, 3, 10)`
+  - `FACEBOOK_DEFAULTS = PlatformDefaults(3.0, 1.5, 0.5, 1, 2)`
+  - `MAX_RETRY_ATTEMPTS_TIKTOK = 3`, `MAX_RETRY_ATTEMPTS_FACEBOOK = 2` (tenacity outer)
+  - `FB_LOGIN_WALL_MARKERS` — tuple of HTML markers for login-wall detection
+- `get_platform_defaults(url) -> PlatformDefaults` — fallback to TikTok defaults
+- `get_max_retry_attempts(url) -> int` — tenacity outer-layer attempts per platform
+- `load_config() / save_config()`, `load_history() / save_history()`
 
 **Storage:** `~/.tiktokder/config.json` (readable/writable by owner)
 
-**Test Coverage:** `test_config.py` (12+ tests)
+**Test Coverage:** `test_config.py` (30+ tests)
+
+#### 6a. `retry_policy.py` (NEW)
+**Purpose:** Tenacity-based outer retry layer with typed exceptions and Retry-After awareness
+**Key Exports:**
+- Exceptions: `LoginRequired`, `Private`, `NotFound`, `RateLimited(retry_after)`, `TransientFailure`, `PermanentFailure`
+- `parse_retry_after(msg) -> float | None` — extracts `Retry-After: N` from error messages
+- `decorrelated_jitter(base=2.0, cap=60.0)` — AWS-style jitter wait function factory
+- `retry_after_aware_wait(base=2.0, cap=60.0)` — honors `RateLimited.retry_after`, falls back to decorrelated jitter
+- `with_retry(max_attempts=3, base=2.0, cap=60.0)` — composed tenacity decorator
+- `_is_retryable(exc) -> bool` — True only for `RateLimited`/`TransientFailure`
+
+**Test Coverage:** `test_retry_policy.py` (~17 tests)
+
+#### 6b. `facebook_resolver.py` (NEW)
+**Purpose:** Pre-resolve `fb.watch` shortlinks via curl_cffi to fast-fail login walls
+**Key Exports:**
+- `is_fb_shortlink(url) -> bool` — matches `fb.watch/...`
+- `resolve_fb_shortlink(url, timeout=5.0) -> tuple[canonical_url, status]` — returns `"login_required"`, `"ok"`, or `"unknown"` (fail-open)
+
+**Behavior:** One-hop HEAD/GET via `curl_cffi.requests.Session(impersonate="chrome131")`, scans 3xx Location and 200 body (50KB cap) for FB login markers. Reuses `FB_LOGIN_WALL_MARKERS` from `config`.
+
+**Test Coverage:** `test_facebook_resolver.py` (~12 tests, all mocked HTTP)
 
 ### Entry Points
 
@@ -112,8 +136,8 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 - `--user USERNAME` — TikTok username for profile scraping
 - `--facebook-page URL` — Facebook page URL for scraping
 - `--output DIR` — Output directory (default: `./downloads`)
-- `--workers N` — Number of concurrent downloads (default: 3)
-- `--delay N` — Delay between requests in seconds (default: 1.0)
+- `--workers N` — Concurrent downloads (default: 3 for TikTok, 1 for Facebook — derived from URL when omitted)
+- `--delay N` — Mean delay between downloads in seconds, gaussian-jittered (default: 1.5 TikTok, 3.0 Facebook)
 
 **Usage:** `python main.py <url|--batch FILE|--user USERNAME|--facebook-page URL> [options]`
 

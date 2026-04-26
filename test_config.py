@@ -7,7 +7,21 @@ from unittest.mock import patch
 
 import pytest
 
-from config import AppConfig, load_config, save_config, load_history, save_history
+from config import (
+    AppConfig,
+    FB_LOGIN_WALL_MARKERS,
+    FACEBOOK_DEFAULTS,
+    MAX_RETRY_ATTEMPTS_FACEBOOK,
+    MAX_RETRY_ATTEMPTS_TIKTOK,
+    PlatformDefaults,
+    TIKTOK_DEFAULTS,
+    get_max_retry_attempts,
+    get_platform_defaults,
+    load_config,
+    save_config,
+    load_history,
+    save_history,
+)
 
 
 class TestAppConfig:
@@ -118,3 +132,72 @@ class TestHistory:
             loaded = load_history()
 
         assert loaded == set()
+
+
+class TestPlatformDefaults:
+    """Per-platform pacing/retry presets."""
+
+    def test_tiktok_default_values(self):
+        assert TIKTOK_DEFAULTS.delay_mean == 1.5
+        assert TIKTOK_DEFAULTS.delay_std == 0.5
+        assert TIKTOK_DEFAULTS.delay_floor == 0.2
+        assert TIKTOK_DEFAULTS.workers == 3
+        assert TIKTOK_DEFAULTS.retries == 10
+
+    def test_facebook_default_values(self):
+        assert FACEBOOK_DEFAULTS.delay_mean == 3.0
+        assert FACEBOOK_DEFAULTS.delay_std == 1.5
+        assert FACEBOOK_DEFAULTS.delay_floor == 0.5
+        assert FACEBOOK_DEFAULTS.workers == 1
+        assert FACEBOOK_DEFAULTS.retries == 2
+
+    def test_platform_defaults_is_dataclass(self):
+        # Must support equality and immutability.
+        a = PlatformDefaults(1.0, 0.1, 0.05, 2, 5)
+        b = PlatformDefaults(1.0, 0.1, 0.05, 2, 5)
+        assert a == b
+
+
+class TestGetPlatformDefaults:
+    def test_tiktok_url(self):
+        d = get_platform_defaults("https://www.tiktok.com/@u/video/123")
+        assert d == TIKTOK_DEFAULTS
+
+    def test_facebook_url(self):
+        d = get_platform_defaults("https://www.facebook.com/x/videos/1")
+        assert d == FACEBOOK_DEFAULTS
+
+    def test_fb_watch_shortlink(self):
+        d = get_platform_defaults("https://fb.watch/abc/")
+        assert d == FACEBOOK_DEFAULTS
+
+    def test_unknown_url_falls_back_to_tiktok(self):
+        d = get_platform_defaults("https://example.com/whatever")
+        assert d == TIKTOK_DEFAULTS
+
+
+class TestMaxRetryAttempts:
+    def test_facebook_url(self):
+        assert get_max_retry_attempts("https://www.facebook.com/x/videos/1") == MAX_RETRY_ATTEMPTS_FACEBOOK
+
+    def test_tiktok_url(self):
+        assert get_max_retry_attempts("https://www.tiktok.com/@u/video/1") == MAX_RETRY_ATTEMPTS_TIKTOK
+
+    def test_unknown_url_uses_tiktok_budget(self):
+        assert get_max_retry_attempts("https://example.com") == MAX_RETRY_ATTEMPTS_TIKTOK
+
+
+class TestFbLoginWallMarkers:
+    def test_markers_are_a_tuple(self):
+        assert isinstance(FB_LOGIN_WALL_MARKERS, tuple)
+
+    def test_markers_not_empty(self):
+        assert len(FB_LOGIN_WALL_MARKERS) > 0
+
+    def test_markers_no_false_positive_on_benign_html(self):
+        benign = "<html><body><h1>My homepage</h1><p>Hello world</p></body></html>"
+        assert not any(m in benign for m in FB_LOGIN_WALL_MARKERS)
+
+    def test_markers_match_login_form(self):
+        login_html = '<html><form id="login_form">…</form></html>'
+        assert any(m in login_html for m in FB_LOGIN_WALL_MARKERS)

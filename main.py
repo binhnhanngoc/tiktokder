@@ -7,6 +7,7 @@ from rich.console import Console
 
 from url_parser import validate_url, validate_facebook_url, read_batch_file, build_user_url
 from downloader import download_batch, get_downloaded_ids
+from config import _default_output_dir, get_platform_defaults
 
 console = Console()
 
@@ -21,9 +22,10 @@ def parse_args() -> argparse.Namespace:
         "--facebook-page", metavar="PAGE_URL",
         help="Facebook page URL to scrape videos from",
     )
-    parser.add_argument("--output", default="./downloads", help="Output directory (default: ./downloads)")
-    parser.add_argument("--workers", type=int, default=3, help="Concurrent downloads (default: 3)")
-    parser.add_argument("--delay", type=float, default=1.0, help="Delay between downloads in seconds (default: 1)")
+    parser.add_argument("--output", default=_default_output_dir(), help="Output directory (default: ./downloads, or <exe>/downloads in portable build)")
+    # `default=None` lets us detect "user did not pass" and fall back to per-platform presets.
+    parser.add_argument("--workers", type=int, default=None, help="Concurrent downloads (default: 3 for TikTok, 1 for Facebook)")
+    parser.add_argument("--delay", type=float, default=None, help="Mean delay (s) between downloads — gaussian jittered (default: 1.5 for TikTok, 3.0 for Facebook)")
     return parser.parse_args()
 
 
@@ -31,11 +33,11 @@ def main() -> None:
     """Main entry point."""
     args = parse_args()
 
-    # Validate numeric args
-    if args.workers < 1:
+    # Validate numeric args (only if the user actually supplied them).
+    if args.workers is not None and args.workers < 1:
         console.print("[red]Error: --workers must be at least 1[/red]")
         sys.exit(1)
-    if args.delay < 0:
+    if args.delay is not None and args.delay < 0:
         console.print("[red]Error: --delay must be non-negative[/red]")
         sys.exit(1)
 
@@ -77,8 +79,14 @@ def main() -> None:
     skip_ids = get_downloaded_ids(args.output)
     console.print(f"[cyan]Processing {len(urls)} URL(s), {len(skip_ids)} already downloaded[/cyan]")
 
+    # Resolve platform-aware defaults when the user didn't pass --workers / --delay.
+    # First URL drives the choice (download_batch applies per-URL jitter internally).
+    defaults = get_platform_defaults(urls[0])
+    workers = args.workers if args.workers is not None else defaults.workers
+    delay = args.delay if args.delay is not None else defaults.delay_mean
+
     # Download
-    results = download_batch(urls, args.output, args.workers, args.delay, skip_ids)
+    results = download_batch(urls, args.output, workers, delay, skip_ids)
 
     # Summary
     ok = sum(1 for r in results if r.success and not r.skipped)

@@ -1,4 +1,4 @@
-"""Build TikTokDer standalone executable via PyInstaller."""
+"""Build TikTokDer portable app via PyInstaller, then zip the onedir bundle."""
 
 import shutil
 import subprocess
@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+DIST_NAME = "TikTokDer"
+ZIP_STEM = "TikTokDer-portable"
 
 
 def main() -> None:
@@ -26,9 +28,32 @@ def main() -> None:
         print("\nBuild failed!", file=sys.stderr)
         sys.exit(1)
 
-    print("\nBuild complete: dist/TikTokDer/")
-    print("  GUI: dist/TikTokDer/TikTokDer.exe")
-    print("  CLI: dist/TikTokDer/TikTokDer-CLI.exe")
+    dist_dir = ROOT / "dist" / DIST_NAME
+    # Seed an empty downloads folder so users see it on first extract
+    (dist_dir / "downloads").mkdir(exist_ok=True)
+    # Drop a README-style portable notice (plain text, no docs rules apply)
+    (dist_dir / "PORTABLE.txt").write_text(
+        "TikTokDer Portable\n"
+        "==================\n"
+        "This is a portable build. Configuration and downloads are stored\n"
+        "next to the executables, so the whole folder is self-contained.\n\n"
+        "  TikTokDer.exe       - desktop GUI\n"
+        "  TikTokDer-CLI.exe   - command-line interface\n"
+        "  data/               - settings + history (created on first run)\n"
+        "  downloads/          - default output folder\n",
+        encoding="utf-8",
+    )
+
+    # Zip the onedir bundle for distribution
+    zip_path = ROOT / "dist" / ZIP_STEM
+    print(f"\nZipping {dist_dir} -> {zip_path}.zip ...")
+    shutil.make_archive(str(zip_path), "zip", root_dir=dist_dir.parent, base_dir=DIST_NAME)
+
+    print("\nBuild complete:")
+    print(f"  Folder: {dist_dir}")
+    print(f"  GUI:    {dist_dir / 'TikTokDer.exe'}")
+    print(f"  CLI:    {dist_dir / 'TikTokDer-CLI.exe'}")
+    print(f"  Zip:    {zip_path}.zip")
 
 
 if __name__ == "__main__":
