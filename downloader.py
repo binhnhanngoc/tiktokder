@@ -176,21 +176,42 @@ class DownloadResult:
     skipped: bool = False
 
 
+# Quality preset → yt-dlp `format` expression. yt-dlp falls back to best
+# available when a height ceiling is unsatisfiable on a given platform.
+QUALITY_FORMATS = {
+    "best": "b",
+    "1080p": "bv*[height<=1080]+ba/b[height<=1080]",
+    "720p": "bv*[height<=720]+ba/b[height<=720]",
+    "480p": "bv*[height<=480]+ba/b[height<=480]",
+    "audio": "ba/b",
+}
+
+
+def _format_for_quality(quality: str) -> str:
+    """Map a quality literal to a yt-dlp format string. Unknown → best."""
+    return QUALITY_FORMATS.get(quality, QUALITY_FORMATS["best"])
+
+
 def get_ydl_opts(
     output_dir: str,
     cookie_browser: str | None = None,
     retries: int = 10,
     force_overwrite: bool = False,
+    quality: str = "best",
+    write_subs: bool = False,
+    write_thumb: bool = False,
 ) -> dict:
     """Return yt-dlp options dict.
 
     `retries` is the inner HTTP-layer retry budget; tenacity in `retry_policy`
     sits above and adds a coarser outer budget. `retry_sleep_functions` apply
     exponential + jitter waits per failure layer (http/fragment/extractor).
+    `quality`/`write_subs`/`write_thumb` plug directly into yt-dlp options;
+    audio-only quality also wires the FFmpegExtractAudio postprocessor.
     """
     opts = {
         "outtmpl": os.path.join(output_dir, "%(id)s_%(title).50s.%(ext)s"),
-        "format": "b",  # Single best stream (avoids watermark + merge failures)
+        "format": _format_for_quality(quality),
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
@@ -212,20 +233,40 @@ def get_ydl_opts(
     if force_overwrite:
         # Force re-download even if the destination file already exists.
         opts["overwrites"] = True
+    if quality == "audio":
+        opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "m4a",
+                "preferredquality": "0",
+            }
+        ]
+    if write_subs:
+        opts["writesubtitles"] = True
+        opts["writeautomaticsub"] = True
+        opts["subtitleslangs"] = ["en"]
+        opts["subtitlesformat"] = "srt/best"
+    if write_thumb:
+        opts["writethumbnail"] = True
     return opts
 
 
 def get_downloaded_ids(output_dir: str) -> set[str]:
-    """Scan output dir for already-downloaded video IDs (numeric prefix before _)."""
-    ids = set()
+    """Recursively scan output dir for already-downloaded video IDs.
+
+    Walks subfolders (platform/uploader tree) so old flat-root files and the
+    new nested layout are both considered. Symlinks are NOT followed to avoid
+    loop attacks if the user puts a symlink inside ``downloads/``.
+    """
+    ids: set[str] = set()
     if not os.path.isdir(output_dir):
         return ids
-    # Match files starting with a numeric video ID
     pattern = re.compile(r"^(\d{15,25})_")
-    for filename in os.listdir(output_dir):
-        match = pattern.match(filename)
-        if match:
-            ids.add(match.group(1))
+    for root, _dirs, files in os.walk(output_dir, followlinks=False):
+        for filename in files:
+            match = pattern.match(filename)
+            if match:
+                ids.add(match.group(1))
     return ids
 
 
@@ -236,14 +277,21 @@ def _do_download(
     cookie_browser: str | None = None,
     retries: int = 10,
     force_overwrite: bool = False,
+    quality: str = "best",
+    write_subs: bool = False,
+    write_thumb: bool = False,
+    base_dir: str | None = None,
 ) -> dict:
     """Inner download path: invokes yt-dlp; raises typed exception on failure.
 
     Pre-resolves `fb.watch` shortlinks before yt-dlp sees them so login walls
-    surface fast and don't consume retry budget.
+    surface fast and don't consume retry budget. Computes the platform-aware
+    ``outtmpl`` from a metadata-only pass so the per-uploader folder is
+    populated before the actual download runs.
     """
     # Lazy import — avoids hard dependency on facebook_resolver module load order.
     from facebook_resolver import is_fb_shortlink, resolve_fb_shortlink
+    from path_builder import build_output_template
 
     if is_fb_shortlink(url):
         canonical, status = resolve_fb_shortlink(url)
@@ -258,11 +306,22 @@ def _do_download(
         cookie_browser=cookie_browser,
         retries=retries,
         force_overwrite=force_overwrite,
+        quality=quality,
+        write_subs=write_subs,
+        write_thumb=write_thumb,
     )
     if progress_hook:
         opts["progress_hooks"] = [progress_hook]
-
+    # Per-call platform-aware outtmpl: metadata pre-pass yields the uploader,
+    # then the same `info` is reused for the download via process_ie_result.
+    target_base = base_dir or output_dir
     try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            try:
+                info_meta = ydl.extract_info(url, download=False, process=False)
+            except Exception:
+                info_meta = None
+            opts["outtmpl"] = build_output_template(url, info_meta or {}, target_base)
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             return info or {}
@@ -288,7 +347,12 @@ def download_video(
     retries: int | None = None,
     max_attempts: int | None = None,
     force_overwrite: bool = False,
-) -> DownloadResult:
+    quality: str = "best",
+    write_subs: bool = False,
+    write_thumb: bool = False,
+    base_dir: str | None = None,
+    return_info: bool = False,
+) -> "DownloadResult | tuple[DownloadResult, dict | None]":
     """Download a single video.
 
     Wraps `_do_download` with the project's retry policy:
@@ -296,7 +360,9 @@ def download_video(
     - Outer: tenacity (`max_attempts`, defaults to platform value) — only retries
       `RateLimited` and `TransientFailure`; permanent classes propagate immediately.
 
-    Public API stays compatible: callers continue to receive a `DownloadResult`.
+    Public API stays compatible by default: callers receive a `DownloadResult`.
+    Pass ``return_info=True`` to also receive the raw yt-dlp info dict (used by
+    the engine to build a HistoryRecord).
     """
     _warn_ffmpeg_missing()
 
@@ -314,24 +380,33 @@ def download_video(
             cookie_browser=cookie_browser,
             retries=retries,
             force_overwrite=force_overwrite,
+            quality=quality,
+            write_subs=write_subs,
+            write_thumb=write_thumb,
+            base_dir=base_dir,
         )
 
+    info: dict | None = None
     try:
         info = _retried()
     except (LoginRequired, Private, NotFound, RateLimited, TransientFailure) as exc:
-        return DownloadResult(url=url, success=False, error=_exception_to_kind(exc))
+        result = DownloadResult(url=url, success=False, error=_exception_to_kind(exc))
+        return (result, None) if return_info else result
     except PermanentFailure as exc:
-        return DownloadResult(url=url, success=False, error=str(exc) or "permanent_failure")
+        result = DownloadResult(url=url, success=False, error=str(exc) or "permanent_failure")
+        return (result, None) if return_info else result
     except Exception as exc:
         # Defensive catch-all — anything not classified above is treated as raw error.
-        return DownloadResult(url=url, success=False, error=str(exc))
+        result = DownloadResult(url=url, success=False, error=str(exc))
+        return (result, None) if return_info else result
 
-    return DownloadResult(
+    result = DownloadResult(
         url=url,
         success=True,
-        video_id=str(info.get("id", "")),
-        title=info.get("title", ""),
+        video_id=str(info.get("id", "")) if info else "",
+        title=(info or {}).get("title", ""),
     )
+    return (result, info) if return_info else result
 
 
 def download_batch(

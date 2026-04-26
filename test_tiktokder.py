@@ -479,6 +479,58 @@ class TestGetYdlOpts:
         opts = get_ydl_opts("/path/to/output")
         assert opts["extract_flat"] is False
 
+    def test_ydl_opts_quality_best_default(self):
+        """Default quality maps to single best stream."""
+        opts = get_ydl_opts("/out")
+        assert opts["format"] == "b"
+
+    def test_ydl_opts_quality_720p_format(self):
+        """720p quality emits height-capped format expression."""
+        opts = get_ydl_opts("/out", quality="720p")
+        assert opts["format"] == "bv*[height<=720]+ba/b[height<=720]"
+
+    def test_ydl_opts_quality_1080p_format(self):
+        opts = get_ydl_opts("/out", quality="1080p")
+        assert opts["format"] == "bv*[height<=1080]+ba/b[height<=1080]"
+
+    def test_ydl_opts_quality_480p_format(self):
+        opts = get_ydl_opts("/out", quality="480p")
+        assert opts["format"] == "bv*[height<=480]+ba/b[height<=480]"
+
+    def test_ydl_opts_quality_audio_postprocessor(self):
+        """Audio quality wires the FFmpegExtractAudio postprocessor."""
+        opts = get_ydl_opts("/out", quality="audio")
+        assert opts["format"] == "ba/b"
+        post = opts.get("postprocessors") or []
+        assert any(
+            p.get("key") == "FFmpegExtractAudio" and p.get("preferredcodec") == "m4a"
+            for p in post
+        )
+
+    def test_ydl_opts_quality_unknown_falls_back_to_best(self):
+        """Unknown quality literal falls back to best (defensive default)."""
+        opts = get_ydl_opts("/out", quality="garbage")
+        assert opts["format"] == "b"
+
+    def test_ydl_opts_subs_flags_set_when_enabled(self):
+        opts = get_ydl_opts("/out", write_subs=True)
+        assert opts["writesubtitles"] is True
+        assert opts["writeautomaticsub"] is True
+        assert opts["subtitleslangs"] == ["en"]
+        assert opts["subtitlesformat"] == "srt/best"
+
+    def test_ydl_opts_subs_default_off(self):
+        opts = get_ydl_opts("/out")
+        assert "writesubtitles" not in opts
+
+    def test_ydl_opts_thumb_flag_set_when_enabled(self):
+        opts = get_ydl_opts("/out", write_thumb=True)
+        assert opts["writethumbnail"] is True
+
+    def test_ydl_opts_thumb_default_off(self):
+        opts = get_ydl_opts("/out")
+        assert "writethumbnail" not in opts
+
 
 class TestGetDownloadedIds:
     """Test scanning for already-downloaded video IDs."""
@@ -524,6 +576,23 @@ class TestGetDownloadedIds:
             ids = get_downloaded_ids(tmpdir)
             assert len(ids) == 1
             assert "1234567890123456789" in ids
+
+    def test_get_downloaded_ids_walks_recursively(self):
+        """Recursive scan picks up IDs from both flat root and nested folders."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Flat-root legacy file.
+            Path(tmpdir, "111111111111111_legacy.mp4").touch()
+            # Nested platform/uploader layout.
+            nested = Path(tmpdir, "tiktok", "@user")
+            nested.mkdir(parents=True)
+            (nested / "222222222222222_clip.mp4").touch()
+            fb = Path(tmpdir, "facebook", "PageName")
+            fb.mkdir(parents=True)
+            (fb / "333333333333333_video.mp4").touch()
+
+            ids = get_downloaded_ids(tmpdir)
+
+            assert ids == {"111111111111111", "222222222222222", "333333333333333"}
 
     def test_get_downloaded_ids_id_boundary_15_digits(self):
         """Test with 15-digit ID (minimum)."""
