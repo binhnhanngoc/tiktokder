@@ -288,6 +288,7 @@ def _do_download(
     write_thumb: bool = False,
     base_dir: str | None = None,
     cookies_file: str | None = None,
+    page_hint: str | None = None,
 ) -> dict:
     """Inner download path: invokes yt-dlp; raises typed exception on failure.
 
@@ -329,7 +330,9 @@ def _do_download(
                 info_meta = ydl.extract_info(url, download=False, process=False)
             except Exception:
                 info_meta = None
-            opts["outtmpl"] = build_output_template(url, info_meta or {}, target_base)
+            opts["outtmpl"] = build_output_template(
+                url, info_meta or {}, target_base, page_hint=page_hint,
+            )
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
             return info or {}
@@ -361,6 +364,7 @@ def download_video(
     base_dir: str | None = None,
     return_info: bool = False,
     cookies_file: str | None = None,
+    page_hint: str | None = None,
 ) -> "DownloadResult | tuple[DownloadResult, dict | None]":
     """Download a single video.
 
@@ -394,6 +398,7 @@ def download_video(
             write_thumb=write_thumb,
             base_dir=base_dir,
             cookies_file=cookies_file,
+            page_hint=page_hint,
         )
 
     info: dict | None = None

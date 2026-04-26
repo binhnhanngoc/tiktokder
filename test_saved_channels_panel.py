@@ -88,13 +88,13 @@ def test_download_all_new_emits_filtered_urls(qapp, tmp_path: Path) -> None:
     )
     panel.history_ids_resolver = lambda: {"dup"}
 
-    captured: list[list[str]] = []
-    panel.download_requested.connect(captured.append)
+    captured: list[tuple[list[str], str]] = []
+    panel.download_requested.connect(lambda urls, hint: captured.append((urls, hint)))
 
     ch = store.find_by_url("tiktok", "https://www.tiktok.com/@a")
     panel._download_all_new(ch)
 
-    assert captured == [["https://x/v/new1"]]
+    assert captured == [(["https://x/v/new1"], "https://www.tiktok.com/@a")]
     # mark_fetched should have updated channel state.
     refreshed = store.find_by_url("tiktok", "https://www.tiktok.com/@a")
     assert refreshed.last_fetched_at != "2026-04-20T00:00:00+00:00"
@@ -162,3 +162,105 @@ def test_main_window_routes_signals_to_platform_queues(qapp, tmp_path, monkeypat
     assert win.tiktok_tab.queue_panel._row_data[0]["status"] == "Downloading"
     # Facebook row should still be Queued.
     assert win.facebook_tab.queue_panel._row_data[0]["status"] == "Queued"
+
+
+# ── Per-channel browse cache ──────────────────────────────────────────────
+
+def test_show_channel_with_cache_loads_without_fetch(qapp, tmp_path: Path) -> None:
+    """Activating a saved row with cached videos populates the browser table
+    instantly — no fetcher is created."""
+    from gui.tiktok_browser_panel import TikTokBrowserPanel
+    from gui.saved_channels_panel import SavedChannelsPanel
+    from saved_channels_store import CachedVideo
+
+    store = SavedChannelsStore()
+    add_channel(
+        store,
+        "tiktok",
+        SavedChannel(
+            url="https://www.tiktok.com/@cached",
+            cached_videos=[
+                CachedVideo(url="https://x/v/1", title="one", video_id="v1"),
+                CachedVideo(url="https://x/v/2", title="two", video_id="v2"),
+            ],
+        ),
+    )
+
+    browser = TikTokBrowserPanel()
+    panel = SavedChannelsPanel(
+        platform="tiktok",
+        browser_panel=browser,
+        store=store,
+        store_path=tmp_path / "saved.json",
+    )
+
+    ch = store.find_by_url("tiktok", "https://www.tiktok.com/@cached")
+    panel._show_channel(ch)
+
+    # Browser panel restored from cache — no fetcher created.
+    assert browser._fetcher is None
+    assert [v.video_id for v in browser._videos] == ["v1", "v2"]
+    assert browser.url_input.text() == "https://www.tiktok.com/@cached"
+    assert browser.table.rowCount() == 2
+
+
+def test_fetch_completed_signal_persists_cache(qapp, tmp_path: Path) -> None:
+    """After a fetch finishes, the saved channel's cache is updated and saved."""
+    from gui.tiktok_browser_panel import TikTokBrowserPanel
+    from gui.saved_channels_panel import SavedChannelsPanel
+    from channel_fetcher import VideoInfo
+
+    store_path = tmp_path / "saved.json"
+    store = SavedChannelsStore()
+    add_channel(store, "tiktok", SavedChannel(url="https://www.tiktok.com/@a"))
+
+    browser = TikTokBrowserPanel()
+    panel = SavedChannelsPanel(
+        platform="tiktok",
+        browser_panel=browser,
+        store=store,
+        store_path=store_path,
+    )
+
+    # Simulate a completed fetch: URL set, _videos populated, signal emits.
+    browser.url_input.setText("https://www.tiktok.com/@a")
+    browser._videos = [
+        VideoInfo(url="https://x/v/1", title="t1", duration=10,
+                  view_count=50, upload_date="20260427", video_id="v1", quality="720p"),
+        VideoInfo(url="https://x/v/2", title="t2", duration=20,
+                  view_count=99, upload_date="20260427", video_id="v2"),
+    ]
+    panel._on_browser_fetch_completed(2)
+
+    ch = store.find_by_url("tiktok", "https://www.tiktok.com/@a")
+    assert [v.video_id for v in ch.cached_videos] == ["v1", "v2"]
+    # Persisted to disk.
+    from saved_channels_store import load_saved_channels
+    reloaded = load_saved_channels(store_path)
+    assert [v.video_id for v in reloaded.tiktok[0].cached_videos] == ["v1", "v2"]
+
+
+def test_fetch_completed_signal_ignores_unsaved_url(qapp, tmp_path: Path) -> None:
+    """Ad-hoc Browse for a URL that isn't saved leaves the store untouched."""
+    from gui.tiktok_browser_panel import TikTokBrowserPanel
+    from gui.saved_channels_panel import SavedChannelsPanel
+    from channel_fetcher import VideoInfo
+
+    store = SavedChannelsStore()
+    add_channel(store, "tiktok", SavedChannel(url="https://www.tiktok.com/@saved"))
+
+    browser = TikTokBrowserPanel()
+    panel = SavedChannelsPanel(
+        platform="tiktok",
+        browser_panel=browser,
+        store=store,
+        store_path=tmp_path / "saved.json",
+    )
+
+    browser.url_input.setText("https://www.tiktok.com/@unsaved-random")
+    browser._videos = [VideoInfo(url="https://x/v/1", title="t", duration=0,
+                                  view_count=0, upload_date=None, video_id="v1")]
+    panel._on_browser_fetch_completed(1)
+
+    ch = store.find_by_url("tiktok", "https://www.tiktok.com/@saved")
+    assert ch.cached_videos == []

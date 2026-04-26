@@ -27,8 +27,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app_state import BrowserPanelState, VideoInfoState
 from gui.icons import icon
 from saved_channels_store import (
+    CachedVideo,
     SavedChannel,
     SavedChannelsStore,
     add_channel,
@@ -36,6 +38,7 @@ from saved_channels_store import (
     remove_channel,
     save_saved_channels,
     select_new_videos,
+    update_cached_videos,
     update_channel,
 )
 from url_parser import detect_platform, validate_url
@@ -73,8 +76,9 @@ class SavedChannelsPanel(QWidget):
     object the existing channel browser uses, embedded below the saved list.
     """
 
-    # Already-validated URLs to add to the platform queue.
-    download_requested = Signal(list)
+    # Already-validated URLs to add to the platform queue, with the source
+    # page URL as hint so downloads land in `<platform>/<page>/`.
+    download_requested = Signal(list, str)
 
     def __init__(
         self,
@@ -129,6 +133,10 @@ class SavedChannelsPanel(QWidget):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
 
+        # When the browser finishes a fetch, snapshot its videos onto the
+        # matching saved channel so the next click can show them instantly.
+        self.browser_panel.fetch_completed.connect(self._on_browser_fetch_completed)
+
         self.refresh_table()
 
     # ── public API ────────────────────────────────────────────────────────
@@ -145,7 +153,11 @@ class SavedChannelsPanel(QWidget):
             self.table.setItem(row, 0, star_item)
             self.table.setItem(row, 1, QTableWidgetItem(ch.nickname or ""))
             self.table.setItem(row, 2, QTableWidgetItem(ch.url))
-            self.table.setItem(row, 3, QTableWidgetItem(str(len(ch.last_fetched_video_ids))))
+            # Prefer cache size — that's the actual row count the user will
+            # see when re-opening the channel. Falls back to the cutoff IDs
+            # for channels saved before the cache existed.
+            video_count = len(ch.cached_videos) or len(ch.last_fetched_video_ids)
+            self.table.setItem(row, 3, QTableWidgetItem(str(video_count)))
             self.table.setItem(row, 4, QTableWidgetItem(_relative_age(ch.last_fetched_at)))
             # Stash channel object on first cell for menu lookup.
             self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, ch)
@@ -197,12 +209,72 @@ class SavedChannelsPanel(QWidget):
         self.refresh_table()
 
     def _on_row_activated(self, _item) -> None:
-        """Double-click → load row's URL into the browser and Browse."""
+        """Double-click → show cached videos when present, otherwise fetch."""
         ch = self._selected_channel()
         if ch is None:
             return
+        self._show_channel(ch)
+
+    # ── show / refresh helpers ────────────────────────────────────────────
+
+    def _show_channel(self, ch: SavedChannel) -> None:
+        """Restore the channel's cached videos into the browser panel.
+
+        Falls back to a fresh fetch when the channel has no cache yet.
+        """
+        if not ch.cached_videos:
+            self._refresh_channel(ch)
+            return
+        state = BrowserPanelState(
+            url=ch.url,
+            videos=[
+                VideoInfoState(
+                    url=v.url,
+                    title=v.title,
+                    duration=v.duration,
+                    view_count=v.view_count,
+                    upload_date=v.upload_date,
+                    video_id=v.video_id,
+                    quality=v.quality,
+                )
+                for v in ch.cached_videos
+            ],
+        )
+        self.browser_panel.load_from_state(state)
+
+    def _refresh_channel(self, ch: SavedChannel) -> None:
+        """Force a fresh fetch for the channel — bypasses the cache."""
         self.browser_panel.url_input.setText(ch.url)
         self.browser_panel._on_browse()
+
+    @Slot(int)
+    def _on_browser_fetch_completed(self, _total: int) -> None:
+        """Persist the freshly-fetched videos onto the matching saved channel.
+
+        No-op when the URL in the browser panel doesn't match a saved channel
+        for this platform — keeps ad-hoc Browse from leaking into the store.
+        """
+        url = self.browser_panel.url_input.text().strip()
+        if not url:
+            return
+        if self.store.find_by_url(self.platform, url) is None:
+            return
+        cached = [
+            CachedVideo(
+                url=v.url,
+                title=v.title or "",
+                duration=v.duration,
+                view_count=v.view_count,
+                upload_date=v.upload_date,
+                video_id=v.video_id or "",
+                quality=v.quality,
+            )
+            for v in self.browser_panel._videos
+        ]
+        if not update_cached_videos(self.store, self.platform, url, cached):
+            return
+        self._persist()
+        self.refresh_table()
 
     # ── refresh-all ───────────────────────────────────────────────────────
 
@@ -220,9 +292,7 @@ class SavedChannelsPanel(QWidget):
         if not channels:
             return
         # Trigger a Browse on the first; user can step through the rest.
-        first = channels[0]
-        self.browser_panel.url_input.setText(first.url)
-        self.browser_panel._on_browse()
+        self._refresh_channel(channels[0])
 
     # ── context menu ──────────────────────────────────────────────────────
 
@@ -236,7 +306,9 @@ class SavedChannelsPanel(QWidget):
             return
 
         menu = QMenu(self)
-        browse_act = menu.addAction("Browse / Refresh")
+        show_label = "Show (cached)" if ch.cached_videos else "Browse"
+        show_act = menu.addAction(show_label)
+        refresh_act = menu.addAction("Refresh (fetch)")
         download_all_act = menu.addAction("Download all new")
         menu.addSeparator()
         rename_act = menu.addAction("Rename + notes...")
@@ -248,9 +320,10 @@ class SavedChannelsPanel(QWidget):
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
         if action is None:
             return
-        if action is browse_act:
-            self.browser_panel.url_input.setText(ch.url)
-            self.browser_panel._on_browse()
+        if action is show_act:
+            self._show_channel(ch)
+        elif action is refresh_act:
+            self._refresh_channel(ch)
         elif action is download_all_act:
             self._download_all_new(ch)
         elif action is rename_act:
@@ -360,7 +433,7 @@ class SavedChannelsPanel(QWidget):
         mark_fetched(self.store, self.platform, ch.url, all_ids, now_iso)
         self._persist()
         self.refresh_table()
-        self.download_requested.emit(urls)
+        self.download_requested.emit(urls, ch.url)
 
     def _gather_history_ids(self) -> set[str]:
         """Snapshot of engine dedup set — uses the resolver passed by parent.

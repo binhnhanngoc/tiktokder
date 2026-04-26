@@ -29,6 +29,7 @@ class DownloadWorker(QThread):
         write_subs: bool = False,
         write_thumb: bool = False,
         cookies_file: str | None = None,
+        page_hint: str | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -40,6 +41,7 @@ class DownloadWorker(QThread):
         self.write_subs = write_subs
         self.write_thumb = write_thumb
         self.cookies_file = cookies_file
+        self.page_hint = page_hint
         self._cancelled = False
         self._info: dict | None = None
 
@@ -71,6 +73,7 @@ class DownloadWorker(QThread):
                 quality=self.quality,
                 write_subs=self.write_subs,
                 write_thumb=self.write_thumb,
+                page_hint=self.page_hint,
                 return_info=True,
             )
             self._info = info
@@ -126,21 +129,34 @@ class DownloadEngine(QObject):
         self._active: dict[str, DownloadWorker] = {}
         self._queued_urls: set[str] = set()  # Dedup: track all URLs ever added
         self._forced_urls: set[str] = set()  # URLs to download with overwrite (force)
+        # Optional source-page URL per queued video — used by path_builder so
+        # /reel/<id> downloads land in the page folder instead of unknown_uploader.
+        self._url_to_page_hint: dict[str, str] = {}
         self._completed_count = 0
         self._total_count = 0
         self._history = load_history()
 
-    def add_urls(self, urls: list[str], force: bool = False) -> None:
+    def add_urls(
+        self,
+        urls: list[str],
+        force: bool = False,
+        page_hint: str | None = None,
+    ) -> None:
         """Add URLs to download queue, skipping duplicates and already-downloaded.
 
         When `force=True`, the history check is bypassed and the worker is
-        instructed to overwrite any existing file on disk.
+        instructed to overwrite any existing file on disk. When `page_hint`
+        is set (e.g. the source page URL for a batch of FB reels scraped
+        from a profile), the same hint is associated with every queued URL
+        so each download lands in `<platform>/<page>/`.
         """
         for url in urls:
             # Skip duplicate URLs already in queue or active
             if url in self._queued_urls:
                 continue
             self._queued_urls.add(url)
+            if page_hint:
+                self._url_to_page_hint[url] = page_hint
 
             vid = extract_video_id(url)
             if not force and vid and vid in self._history:
@@ -168,6 +184,7 @@ class DownloadEngine(QObject):
                 write_subs=self.write_subs,
                 write_thumb=self.write_thumb,
                 cookies_file=self.cookies_file,
+                page_hint=self._url_to_page_hint.get(url),
                 parent=self,
             )
             worker.progress.connect(self._on_progress)
@@ -239,25 +256,30 @@ class DownloadEngine(QObject):
             worker.cancel()
         self.queue_updated.emit(0)
 
-    def retry_url(self, url: str, force: bool = False) -> None:
+    def retry_url(self, url: str, force: bool = False, page_hint: str | None = None) -> None:
         """Re-queue a URL that previously finished (failed/cancelled/skipped).
 
         Removes URL from the dedup set so add_urls doesn't filter it out.
         Active downloads are left alone (caller should ensure URL is not active).
         When `force=True`, the history check is bypassed and the file is
-        overwritten on disk.
+        overwritten on disk. `page_hint` overrides any stored hint for `url`.
         """
         self._queued_urls.discard(url)
-        self.add_urls([url], force=force)
+        self.add_urls([url], force=force, page_hint=page_hint)
 
-    def retry_urls(self, urls: list[str], force: bool = False) -> None:
+    def retry_urls(
+        self,
+        urls: list[str],
+        force: bool = False,
+        page_hint: str | None = None,
+    ) -> None:
         """Bulk re-queue previously finished URLs.
 
-        See `retry_url` for the meaning of `force`.
+        See `retry_url` for the meaning of `force` and `page_hint`.
         """
         for url in urls:
             self._queued_urls.discard(url)
-        self.add_urls(urls, force=force)
+        self.add_urls(urls, force=force, page_hint=page_hint)
 
     def _build_record(
         self,

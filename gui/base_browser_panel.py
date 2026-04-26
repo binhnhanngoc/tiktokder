@@ -31,7 +31,14 @@ _HEADERS = ("", "Title", "Duration", "Quality", "Views", "Date")
 class BaseBrowserPanel(QWidget):
     """Base panel with URL input + video table + select/download controls."""
 
-    download_requested = Signal(list)  # list[str] of video URLs
+    # Emits (urls, page_hint) — page_hint is the source page URL the user
+    # browsed to scrape these videos. Empty string when not applicable.
+    download_requested = Signal(list, str)
+
+    # Emitted after a successful fetch with the count of videos found.
+    # Listeners can read `self._videos` and `self.url_input.text()` to snapshot
+    # the result (used by SavedChannelsPanel to refresh the per-channel cache).
+    fetch_completed = Signal(int)
 
     def __init__(self, placeholder: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -156,6 +163,7 @@ class BaseBrowserPanel(QWidget):
     def _on_fetch_done(self, total: int) -> None:
         self.browse_btn.setEnabled(True)
         self.status_label.setText(f"Found {total} videos")
+        self.fetch_completed.emit(total)
 
     def _select_all(self) -> None:
         self._set_all_checks(True)
@@ -176,7 +184,7 @@ class BaseBrowserPanel(QWidget):
             if cb and cb.isChecked():
                 urls.append(self._videos[row].url)
         if urls:
-            self.download_requested.emit(urls)
+            self.download_requested.emit(urls, self.url_input.text().strip())
 
     @staticmethod
     def _format_duration(seconds: int) -> str:

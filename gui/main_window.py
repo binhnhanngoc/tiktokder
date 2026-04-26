@@ -39,7 +39,7 @@ from gui.platform_tab import PlatformTab
 from gui.settings_panel import SettingsPanel
 from gui.status_bar_widget import StatusBarWidget
 from gui.tiktok_browser_panel import TikTokBrowserPanel
-from saved_channels_store import load_saved_channels
+from saved_channels_store import load_saved_channels, resolve_page_hint
 from url_parser import detect_platform
 
 
@@ -218,12 +218,21 @@ class MainWindow(QMainWindow):
     def _queue_url(self, url: str) -> None:
         self._tab_for_url(url).queue_panel.add_download(url)
 
-    @Slot(list)
-    def _on_channel_download(self, urls: list[str]) -> None:
-        """Browser-panel or saved-channel `Download all new` → queue per platform."""
+    @Slot(list, str)
+    def _on_channel_download(self, urls: list[str], page_hint: str = "") -> None:
+        """Browser-panel or saved-channel `Download all new` → queue per platform.
+
+        `page_hint` is the source page URL the user browsed; threaded into the
+        engine so each video lands in `<platform>/<page>/` even when its own
+        URL (e.g. ``/reel/<id>``) carries no page name. When the URL matches
+        a saved channel with a nickname, the nickname wins so users can name
+        ugly URLs (e.g. ``profile.php?id=...``) anything they like.
+        """
         for url in urls:
             self._queue_url(url)
-        self.engine.add_urls(urls)
+        platform = detect_platform(page_hint) if page_hint else None
+        resolved = resolve_page_hint(self._saved_store, platform, page_hint) if page_hint else ""
+        self.engine.add_urls(urls, page_hint=resolved or None)
         self._focus_first_platform(urls)
         self._update_status_count()
 

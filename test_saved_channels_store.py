@@ -11,14 +11,17 @@ import pytest
 from saved_channels_store import (
     DEFAULT_MAX_PER_PLATFORM,
     SCHEMA_VERSION,
+    CachedVideo,
     SavedChannel,
     SavedChannelsStore,
     add_channel,
     load_saved_channels,
     mark_fetched,
     remove_channel,
+    resolve_page_hint,
     save_saved_channels,
     select_new_videos,
+    update_cached_videos,
     update_channel,
 )
 
@@ -245,3 +248,146 @@ def test_save_overwrites_existing_file_atomically(tmp_path: Path) -> None:
     save_saved_channels(p, SavedChannelsStore(tiktok=[SavedChannel(url="https://b")]))
     loaded = load_saved_channels(p)
     assert [c.url for c in loaded.tiktok] == ["https://b"]
+
+
+# ─── resolve_page_hint ──────────────────────────────────────────────────────
+
+def test_resolve_page_hint_returns_nickname_when_set() -> None:
+    store = SavedChannelsStore(facebook=[
+        SavedChannel(
+            url="https://www.facebook.com/profile.php?id=100093703437726",
+            nickname="My Friend",
+        )
+    ])
+    out = resolve_page_hint(
+        store, "facebook", "https://www.facebook.com/profile.php?id=100093703437726"
+    )
+    assert out == "My Friend"
+
+
+def test_resolve_page_hint_falls_through_when_no_nickname() -> None:
+    store = SavedChannelsStore(facebook=[
+        SavedChannel(url="https://www.facebook.com/NeonNewZealand", nickname="")
+    ])
+    url = "https://www.facebook.com/NeonNewZealand"
+    assert resolve_page_hint(store, "facebook", url) == url
+
+
+def test_resolve_page_hint_falls_through_when_no_match() -> None:
+    store = SavedChannelsStore()
+    url = "https://www.facebook.com/SomePage"
+    assert resolve_page_hint(store, "facebook", url) == url
+
+
+def test_resolve_page_hint_handles_empty_inputs() -> None:
+    store = SavedChannelsStore()
+    assert resolve_page_hint(store, "facebook", "") == ""
+    assert resolve_page_hint(store, None, "https://x") == "https://x"
+
+
+def test_resolve_page_hint_strips_whitespace_only_nickname() -> None:
+    # Whitespace-only nickname is treated as empty so we don't end up with
+    # bizarre slugs from accidental input.
+    store = SavedChannelsStore(facebook=[
+        SavedChannel(url="https://x", nickname="   ")
+    ])
+    assert resolve_page_hint(store, "facebook", "https://x") == "https://x"
+
+
+# ─── cached_videos ────────────────────────────────────────────────────────
+
+def test_cached_videos_round_trip(tmp_path: Path) -> None:
+    """Persist + load preserves the per-channel video cache."""
+    p = tmp_path / "saved.json"
+    store = SavedChannelsStore()
+    add_channel(
+        store,
+        "tiktok",
+        SavedChannel(
+            url="https://www.tiktok.com/@a",
+            cached_videos=[
+                CachedVideo(
+                    url="https://x/v/1",
+                    title="hello",
+                    duration=42,
+                    view_count=100,
+                    upload_date="20260415",
+                    video_id="v1",
+                    quality="720p",
+                ),
+            ],
+        ),
+    )
+    save_saved_channels(p, store)
+    loaded = load_saved_channels(p)
+    assert len(loaded.tiktok) == 1
+    cached = loaded.tiktok[0].cached_videos
+    assert len(cached) == 1
+    assert cached[0].url == "https://x/v/1"
+    assert cached[0].title == "hello"
+    assert cached[0].duration == 42
+    assert cached[0].video_id == "v1"
+    assert cached[0].quality == "720p"
+
+
+def test_cached_videos_missing_key_loads_as_empty(tmp_path: Path) -> None:
+    """Files written before the field existed still load cleanly."""
+    p = tmp_path / "saved.json"
+    p.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "tiktok": [{"url": "https://www.tiktok.com/@a", "nickname": "A"}],
+                "facebook": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = load_saved_channels(p)
+    assert loaded.tiktok[0].cached_videos == []
+
+
+def test_cached_videos_skips_malformed_entries(tmp_path: Path) -> None:
+    """Bad entries in cached_videos are dropped, good ones kept."""
+    p = tmp_path / "saved.json"
+    p.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "tiktok": [
+                    {
+                        "url": "https://www.tiktok.com/@a",
+                        "cached_videos": [
+                            {"url": "https://x/v/1", "title": "ok", "rogue": 1},
+                            {"title": "no url"},  # dropped — missing url
+                            "not even a dict",     # dropped
+                        ],
+                    }
+                ],
+                "facebook": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = load_saved_channels(p)
+    cached = loaded.tiktok[0].cached_videos
+    assert [v.url for v in cached] == ["https://x/v/1"]
+
+
+def test_update_cached_videos_replaces_list() -> None:
+    store = SavedChannelsStore()
+    add_channel(store, "tiktok", SavedChannel(url="https://x"))
+    ok = update_cached_videos(
+        store,
+        "tiktok",
+        "https://x",
+        [CachedVideo(url="https://x/v/1", title="t", video_id="v1")],
+    )
+    assert ok is True
+    cached = store.find_by_url("tiktok", "https://x").cached_videos
+    assert [v.video_id for v in cached] == ["v1"]
+
+
+def test_update_cached_videos_returns_false_when_missing() -> None:
+    store = SavedChannelsStore()
+    assert update_cached_videos(store, "tiktok", "https://nope", []) is False

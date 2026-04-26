@@ -30,12 +30,48 @@ SUPPORTED_PLATFORMS = ("tiktok", "facebook")
 
 
 @dataclass
+class CachedVideo:
+    """One persisted video row attached to a saved channel.
+
+    Mirrors the public shape of `channel_fetcher.VideoInfo` but lives here so
+    this module stays free of GUI/state-layer imports.
+    """
+
+    url: str
+    title: str = ""
+    duration: int | None = None
+    view_count: int | None = None
+    upload_date: str | None = None
+    video_id: str = ""
+    quality: str | None = None
+
+
+_CACHED_VIDEO_FIELDS = {f.name for f in fields(CachedVideo)}
+
+
+def _cached_video_from_dict(d) -> CachedVideo | None:
+    """Build a CachedVideo from a dict, ignoring unknown keys. None if no url."""
+    if not isinstance(d, dict):
+        return None
+    url = d.get("url")
+    if not isinstance(url, str) or not url:
+        return None
+    filtered = {k: v for k, v in d.items() if k in _CACHED_VIDEO_FIELDS}
+    try:
+        return CachedVideo(**filtered)
+    except TypeError:
+        return None
+
+
+@dataclass
 class SavedChannel:
     """One saved channel/page row.
 
     `last_fetched_at` is ISO8601 with timezone; `last_fetched_video_ids`
     captures what the last successful Browse fetch returned (used by the
     "Download all new" filter to scope to post-cutoff videos).
+    `cached_videos` snapshots the full per-video metadata from the last
+    Browse so the UI can re-show the channel without refetching.
     """
 
     url: str
@@ -44,6 +80,7 @@ class SavedChannel:
     starred: bool = False
     last_fetched_at: str | None = None
     last_fetched_video_ids: list[str] = field(default_factory=list)
+    cached_videos: list[CachedVideo] = field(default_factory=list)
 
 
 _FIELDS = {f.name for f in fields(SavedChannel)}
@@ -58,6 +95,13 @@ def _channel_from_dict(d: dict) -> SavedChannel | None:
     ids = filtered.get("last_fetched_video_ids")
     if ids is not None and not isinstance(ids, list):
         filtered["last_fetched_video_ids"] = []
+    raw_cached = filtered.get("cached_videos")
+    if isinstance(raw_cached, list):
+        filtered["cached_videos"] = [
+            cv for cv in (_cached_video_from_dict(item) for item in raw_cached) if cv is not None
+        ]
+    else:
+        filtered["cached_videos"] = []
     return SavedChannel(**filtered)
 
 
@@ -85,6 +129,23 @@ class SavedChannelsStore:
             if ch.url == url:
                 return ch
         return None
+
+
+def resolve_page_hint(store: SavedChannelsStore, platform: str | None, page_hint: str) -> str:
+    """Substitute a saved-channel nickname for ``page_hint`` when one is set.
+
+    Used by the download flow so a page hint that matches a saved channel
+    with a user-provided nickname becomes the folder name instead of the
+    URL slug. Falls through unchanged when no platform, no match, or the
+    matching channel has no nickname.
+    """
+    if not page_hint or not platform:
+        return page_hint
+    ch = store.find_by_url(platform, page_hint)
+    if ch is None:
+        return page_hint
+    nickname = (ch.nickname or "").strip()
+    return nickname or page_hint
 
 
 def _read_file(path: Path) -> SavedChannelsStore:
@@ -234,6 +295,20 @@ def mark_fetched(
     )
 
 
+def update_cached_videos(
+    store: SavedChannelsStore,
+    platform: str,
+    url: str,
+    cached_videos: Iterable[CachedVideo],
+) -> bool:
+    """Replace the matching channel's cached_videos snapshot. Returns True if updated."""
+    ch = store.find_by_url(platform, url)
+    if ch is None:
+        return False
+    ch.cached_videos = list(cached_videos)
+    return True
+
+
 def _iso_to_yyyymmdd(iso: str) -> str | None:
     """Convert ISO8601 (``2026-04-26T12:34:56+07:00``) → ``"20260426"``.
 
@@ -290,6 +365,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "DEFAULT_MAX_PER_PLATFORM",
     "SUPPORTED_PLATFORMS",
+    "CachedVideo",
     "SavedChannel",
     "SavedChannelsStore",
     "load_saved_channels",
@@ -298,5 +374,6 @@ __all__ = [
     "remove_channel",
     "update_channel",
     "mark_fetched",
+    "update_cached_videos",
     "select_new_videos",
 ]

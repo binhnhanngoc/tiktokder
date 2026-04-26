@@ -63,6 +63,24 @@ class TestPlatformSlugFromUrl:
         assert platform_slug_from_url("https://www.facebook.com/watch/?v=123") == UNKNOWN_UPLOADER \
             or platform_slug_from_url("https://www.facebook.com/watch/?v=123") != ""
 
+    def test_facebook_reel_url_skips_numeric_id(self):
+        # /reel/<digits> has no page name in path — must NOT use the video id.
+        assert platform_slug_from_url("https://www.facebook.com/reel/1438416620945910") == UNKNOWN_UPLOADER
+
+    def test_facebook_videos_path_skips_numeric_id(self):
+        # /pagename/videos/<digits> still picks pagename, not the trailing id.
+        assert platform_slug_from_url("https://www.facebook.com/NeonNewZealand/videos/1438416620945910") == "NeonNewZealand"
+
+    def test_facebook_profile_php_uses_id_query(self):
+        # profile.php?id=<digits> — only stable identifier is the id;
+        # prefix with profile_ so each profile gets its own folder.
+        url = "https://www.facebook.com/profile.php?id=100093703437726"
+        assert platform_slug_from_url(url) == "profile_100093703437726"
+
+    def test_facebook_profile_php_without_id_falls_back(self):
+        # No `id` query → no usable identifier in URL → unknown.
+        assert platform_slug_from_url("https://www.facebook.com/profile.php") == UNKNOWN_UPLOADER
+
     def test_empty_url(self):
         assert platform_slug_from_url("") == UNKNOWN_UPLOADER
 
@@ -108,6 +126,85 @@ class TestBuildOutputTemplate:
         tmpl = build_output_template(url, info, "downloads")
         norm = tmpl.replace(os.sep, "/")
         assert "Channel_Name" in norm
+
+    def test_facebook_reel_with_numeric_uploader_id_falls_back_to_url(self):
+        # yt-dlp commonly returns only a numeric uploader_id for FB reels —
+        # must NOT become the folder name.
+        url = "https://www.facebook.com/NeonNewZealand/videos/123"
+        info = {"uploader_id": "1017087350885646", "id": "123"}
+        tmpl = build_output_template(url, info, "downloads")
+        norm = tmpl.replace(os.sep, "/")
+        assert "1017087350885646" not in norm
+        assert "NeonNewZealand" in norm
+
+    def test_facebook_reel_uses_uploader_url_when_path_lacks_page(self):
+        # /reel/<id> has no page in path — recover from uploader_url.
+        url = "https://www.facebook.com/reel/1438416620945910"
+        info = {
+            "uploader_id": "1017087350885646",
+            "uploader_url": "https://www.facebook.com/NeonNewZealand",
+        }
+        tmpl = build_output_template(url, info, "downloads")
+        norm = tmpl.replace(os.sep, "/")
+        assert "NeonNewZealand" in norm
+        assert "1438416620945910" not in norm.split("/")[:-1]  # not in the folder portion
+
+    def test_facebook_reel_no_metadata_lands_in_unknown_uploader(self):
+        # Worst case: /reel/<id> URL with empty info → unknown_uploader, never numeric.
+        url = "https://www.facebook.com/reel/1438416620945910"
+        tmpl = build_output_template(url, {}, "downloads")
+        norm = tmpl.replace(os.sep, "/")
+        assert f"/facebook/{UNKNOWN_UPLOADER}/" in norm
+
+    def test_page_hint_url_overrides_missing_metadata(self):
+        # Browser panel scraped from facebook.com/NeonNewZealand → reel URL
+        # carries no page; hint URL recovers the page name.
+        url = "https://www.facebook.com/reel/1438416620945910"
+        tmpl = build_output_template(
+            url, {}, "downloads",
+            page_hint="https://www.facebook.com/NeonNewZealand",
+        )
+        norm = tmpl.replace(os.sep, "/")
+        assert "/facebook/NeonNewZealand/" in norm
+
+    def test_page_hint_bare_slug_used_directly(self):
+        url = "https://www.facebook.com/watch/?v=999"
+        tmpl = build_output_template(url, {}, "downloads", page_hint="NeonNewZealand")
+        norm = tmpl.replace(os.sep, "/")
+        assert "/facebook/NeonNewZealand/" in norm
+
+    def test_page_hint_overrides_numeric_uploader_id(self):
+        url = "https://www.facebook.com/reel/123"
+        info = {"uploader_id": "1017087350885646"}
+        tmpl = build_output_template(
+            url, info, "downloads", page_hint="https://www.facebook.com/NeonNewZealand"
+        )
+        norm = tmpl.replace(os.sep, "/")
+        assert "NeonNewZealand" in norm
+        assert "1017087350885646" not in norm
+
+    def test_page_hint_empty_string_is_ignored(self):
+        url = "https://www.facebook.com/PageName/videos/9"
+        tmpl = build_output_template(url, {}, "downloads", page_hint="")
+        norm = tmpl.replace(os.sep, "/")
+        assert "PageName" in norm
+
+    def test_page_hint_numeric_only_is_ignored(self):
+        url = "https://www.facebook.com/PageName/videos/9"
+        tmpl = build_output_template(url, {}, "downloads", page_hint="1234567890")
+        norm = tmpl.replace(os.sep, "/")
+        assert "PageName" in norm
+        assert "1234567890" not in norm
+
+    def test_page_hint_profile_php_id_becomes_profile_folder(self):
+        # User browses facebook.com/profile.php?id=<digits>; reel downloads
+        # land in `<facebook>/profile_<digits>/`, not in literal `profile.php/`.
+        url = "https://www.facebook.com/reel/9876543210"
+        hint = "https://www.facebook.com/profile.php?id=100093703437726"
+        tmpl = build_output_template(url, {}, "downloads", page_hint=hint)
+        norm = tmpl.replace(os.sep, "/")
+        assert "/facebook/profile_100093703437726/" in norm
+        assert "profile.php" not in norm
 
     def test_base_dir_with_absolute_path(self):
         url = "https://www.tiktok.com/@u/video/1"
