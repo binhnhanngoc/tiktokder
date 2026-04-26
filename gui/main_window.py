@@ -74,7 +74,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.download_tab, "Download")
 
         # --- Channel tab ---
-        self.channel_browser = ChannelBrowser(cookie_browser=config.cookie_browser)
+        self.channel_browser = ChannelBrowser(
+            cookie_browser=config.cookie_browser,
+            cookies_file=config.cookies_file,
+        )
         self.tabs.addTab(self.channel_browser, "Channel / Page")
 
         # --- History tab ---
@@ -250,6 +253,7 @@ class MainWindow(QMainWindow):
         self.engine.write_thumb = self.config.write_thumbnail
         self.engine.history_max_entries = self.config.history_max_entries
         self.channel_browser.set_cookie_browser(self.config.cookie_browser)
+        self.channel_browser.set_cookies_file(self.config.cookies_file)
 
     def _setup_menu(self) -> None:
         """Create menu bar with File and Help menus."""

@@ -19,6 +19,7 @@ except ImportError:
 from PySide6.QtCore import QThread, Signal
 
 from channel_fetcher import VideoInfo
+from facebook_cookies import filter_facebook, load_netscape_cookies
 
 
 # Matches Facebook reel/video URLs in href attributes
@@ -39,6 +40,7 @@ class FacebookFetcher(QThread):
         page_url: str,
         max_scrolls: int = 10,
         seed_seen_urls: set[str] | None = None,
+        cookies_file: str | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -47,6 +49,9 @@ class FacebookFetcher(QThread):
         # Pre-seeded dedup set lets "Load more" suppress already-shown videos
         # so the loop only emits new ones once Facebook lazy-loads further.
         self._seed_seen_urls = set(seed_seen_urls) if seed_seen_urls else set()
+        # Optional Netscape cookies.txt — when set, fetcher loads it as a
+        # logged-in FB session, which lifts the 10-reel anonymous cap.
+        self.cookies_file = cookies_file
         self._cancelled = False
 
     def run(self) -> None:
@@ -71,12 +76,31 @@ class FacebookFetcher(QThread):
         try:
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
+                # A real-looking context plus optional cookies — when the user
+                # supplies a Netscape cookies.txt we inject it before goto so
+                # the very first request is authenticated and FB serves the
+                # full reel feed instead of the anonymous 10-card preview.
+                context = browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0 Safari/537.36"
+                    ),
+                    viewport={"width": 1280, "height": 900},
+                    locale="en-US",
+                )
+                self._inject_cookies_if_any(context)
+                page = context.new_page()
 
-                # Navigate to the profile's reels/videos tab
+                # Navigate to the profile's reels/videos tab.
+                # Use ``domcontentloaded`` instead of ``networkidle`` because
+                # logged-in FB pages stream presence/notification traffic
+                # continuously and never go idle, which would deadline-kill
+                # the goto when cookies are in play. The fixed 3.5s settle
+                # below replaces the lost idle-wait.
                 url = self._normalize_url(self.page_url)
-                page.goto(url, wait_until="networkidle", timeout=30_000)
-                page.wait_for_timeout(2000)
+                page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                page.wait_for_timeout(3500)
 
                 # Scroll to load more content
                 for _ in range(self.max_scrolls):
@@ -132,6 +156,32 @@ class FacebookFetcher(QThread):
     def cancel(self) -> None:
         """Request cancellation."""
         self._cancelled = True
+
+    def _inject_cookies_if_any(self, context) -> None:
+        """Load cookies.txt into ``context`` if the user configured a file.
+
+        Failures are surfaced via ``error.emit`` but don't abort — the fetcher
+        still tries the page anonymously, which at worst yields the same
+        preview cap as before. That keeps the feature graceful when the file
+        path is stale or the user typo'd it.
+        """
+        if not self.cookies_file:
+            return
+        try:
+            cookies = filter_facebook(load_netscape_cookies(self.cookies_file))
+        except Exception as e:
+            self.error.emit(f"Could not read cookies file: {e}")
+            return
+        if not cookies:
+            self.error.emit(
+                "No facebook.com cookies found in the configured cookies file. "
+                "Continuing anonymously (10-reel cap may apply)."
+            )
+            return
+        try:
+            context.add_cookies(cookies)
+        except Exception as e:
+            self.error.emit(f"Could not apply cookies: {e}")
 
     @staticmethod
     def _normalize_url(url: str) -> str:

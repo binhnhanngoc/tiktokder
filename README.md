@@ -96,7 +96,8 @@ python main.py --facebook-page "https://www.facebook.com/pagename"
 | Output Directory | path | per-uploader subfolders are created automatically |
 | Concurrent Downloads | 1–10 | platform-aware pacing applies on top |
 | Delay Between Downloads | 0.0–10.0 s | gaussian jitter applied per platform |
-| Cookie Browser | None / chrome / firefox / edge | only used for TikTok (Facebook uses Playwright) |
+| Cookie Browser | None / chrome / firefox / edge | TikTok yt-dlp cookies — auto-extracted from your browser |
+| Facebook Cookies File | path to Netscape `cookies.txt` (optional) | lifts the **10-reel cap** on anonymous FB profile scraping. Export with a browser extension like *Get cookies.txt LOCALLY* while logged in to facebook.com, then point here. Use a burner FB account if possible — scraping technically violates FB ToS |
 | Default Quality | `Best`, `1080p`, `720p`, `480p`, `Audio only` | audio-only writes `.m4a` (requires ffmpeg) |
 | Write subtitles (en) | on / off | sidecar `.srt` next to the video |
 | Write thumbnail | on / off | sidecar `.jpg` next to the video |

@@ -12,11 +12,18 @@ from gui.icons import icon
 class FacebookBrowserPanel(BaseBrowserPanel):
     """Browse Facebook pages/profiles via Playwright scraping."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        cookies_file: str | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(
             placeholder="Paste Facebook page URL (e.g. https://www.facebook.com/pagename)...",
             parent=parent,
         )
+        # Path to Netscape cookies.txt — when set, gets handed to FacebookFetcher
+        # so the scrape runs as a logged-in session instead of anonymous.
+        self.cookies_file = cookies_file
 
         # "Max scrolls" budget per fetch — exposed because Facebook lazy-loads
         # videos slowly and the right value depends on profile size.
@@ -46,7 +53,12 @@ class FacebookBrowserPanel(BaseBrowserPanel):
                 "Install: pip install playwright && playwright install chromium"
             )
             return None
-        return FacebookFetcher(url, max_scrolls=self.scrolls_spin.value(), parent=self)
+        return FacebookFetcher(
+            url,
+            max_scrolls=self.scrolls_spin.value(),
+            cookies_file=self.cookies_file,
+            parent=self,
+        )
 
     def _start_status_text(self) -> str:
         return "Fetching Facebook videos (browser scraping)..."
@@ -69,6 +81,7 @@ class FacebookBrowserPanel(BaseBrowserPanel):
             url,
             max_scrolls=self.scrolls_spin.value(),
             seed_seen_urls=seen,
+            cookies_file=self.cookies_file,
             parent=self,
         )
         self.load_more_btn.setEnabled(False)

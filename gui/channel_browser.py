@@ -20,16 +20,22 @@ class ChannelBrowser(QWidget):
 
     download_requested = Signal(list)  # list[str] of URLs
 
-    def __init__(self, cookie_browser: str | None = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        cookie_browser: str | None = None,
+        cookies_file: str | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.cookie_browser = cookie_browser
+        self.cookies_file = cookies_file
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._tabs = QTabWidget()
         self.tiktok_panel = TikTokBrowserPanel(cookie_browser=cookie_browser)
-        self.facebook_panel = FacebookBrowserPanel()
+        self.facebook_panel = FacebookBrowserPanel(cookies_file=cookies_file)
         self._tabs.addTab(self.tiktok_panel, "TikTok")
         self._tabs.addTab(self.facebook_panel, "Facebook")
         layout.addWidget(self._tabs)
@@ -72,3 +78,9 @@ class ChannelBrowser(QWidget):
         """Propagate cookie-browser setting to TikTok panel (FB scraper ignores it)."""
         self.cookie_browser = value
         self.tiktok_panel.cookie_browser = value
+
+    @Slot(str)
+    def set_cookies_file(self, value: str | None) -> None:
+        """Propagate cookies.txt path to the Facebook panel (TikTok ignores it)."""
+        self.cookies_file = value
+        self.facebook_panel.cookies_file = value

@@ -85,6 +85,9 @@ class AppConfig:
     workers: int = 3
     delay: float = 0.5
     cookie_browser: str | None = None
+    # Path to a Netscape-format cookies.txt — currently consumed by the
+    # Facebook scraper to bypass anonymous-only feed caps. None = no cookies.
+    cookies_file: str | None = None
     window_width: int = 900
     window_height: int = 600
     window_x: int | None = None

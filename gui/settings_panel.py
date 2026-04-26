@@ -91,7 +91,24 @@ class SettingsPanel(QWidget):
             idx = self.cookie_combo.findText(config.cookie_browser)
             if idx >= 0:
                 self.cookie_combo.setCurrentIndex(idx)
+        self.cookie_combo.setToolTip("Used by yt-dlp for TikTok downloads.")
         layout.addRow("Cookie Browser:", self.cookie_combo)
+
+        # Facebook cookies file (Netscape cookies.txt) — bypasses the
+        # anonymous-only feed cap on FB profile reels/videos tabs.
+        cookies_row = QHBoxLayout()
+        self.cookies_file_input = QLineEdit(config.cookies_file or "")
+        self.cookies_file_input.setPlaceholderText("Path to Netscape cookies.txt (optional)")
+        self.cookies_file_input.setToolTip(
+            "Export Facebook cookies with a browser extension "
+            "(e.g. 'Get cookies.txt LOCALLY') and point to the file here. "
+            "Lifts the 10-reel cap on FB profile scraping."
+        )
+        cookies_row.addWidget(self.cookies_file_input, stretch=1)
+        self.cookies_browse_btn = QPushButton("Browse...")
+        self.cookies_browse_btn.clicked.connect(self._browse_cookies_file)
+        cookies_row.addWidget(self.cookies_browse_btn)
+        layout.addRow("Facebook Cookies File:", cookies_row)
 
         # Default quality
         self.quality_combo = QComboBox()
@@ -121,6 +138,7 @@ class SettingsPanel(QWidget):
         self.workers_spin.valueChanged.connect(self._save)
         self.delay_spin.valueChanged.connect(self._save)
         self.cookie_combo.currentTextChanged.connect(self._save)
+        self.cookies_file_input.textChanged.connect(self._save)
         self.quality_combo.currentIndexChanged.connect(self._save)
         self.subs_check.stateChanged.connect(self._save)
         self.thumb_check.stateChanged.connect(self._save)
@@ -139,6 +157,18 @@ class SettingsPanel(QWidget):
         if path:
             self.output_dir_input.setText(path)
 
+    def _browse_cookies_file(self) -> None:
+        """Open native file picker for the Netscape cookies.txt."""
+        start = self.cookies_file_input.text() or self.config.output_dir
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Facebook Cookies File",
+            start,
+            "Cookies (*.txt);;All files (*.*)",
+        )
+        if path:
+            self.cookies_file_input.setText(path)
+
     @Slot()
     def _save(self) -> None:
         """Persist current settings to config file."""
@@ -147,6 +177,8 @@ class SettingsPanel(QWidget):
         self.config.delay = self.delay_spin.value()
         cookie = self.cookie_combo.currentText()
         self.config.cookie_browser = cookie if cookie != "None" else None
+        cookies_file = self.cookies_file_input.text().strip()
+        self.config.cookies_file = cookies_file or None
         self.config.quality_default = self.quality_combo.currentData() or "best"
         self.config.write_subtitles = self.subs_check.isChecked()
         self.config.write_thumbnail = self.thumb_check.isChecked()
@@ -160,6 +192,7 @@ class SettingsPanel(QWidget):
         self.workers_spin.setValue(defaults.workers)
         self.delay_spin.setValue(defaults.delay)
         self.cookie_combo.setCurrentIndex(0)
+        self.cookies_file_input.clear()
         self._select_quality(defaults.quality_default)
         self.subs_check.setChecked(defaults.write_subtitles)
         self.thumb_check.setChecked(defaults.write_thumbnail)
