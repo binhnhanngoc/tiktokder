@@ -95,9 +95,14 @@ def validate_tiktok_url(url: str) -> bool:
 - **Classes:**
   - `DownloadResult` — Dataclass: `url, success, video_id, title, error, skipped, file_path`
 - **Functions:**
-  - `get_ydl_opts(output_dir, cookie_browser=None, quality="best", write_subs=False, write_thumb=False, cookies_file=None) -> dict` — Build yt-dlp options (quality preset, impersonate=chrome136, postprocessors)
+  - `get_ydl_opts(output_dir, cookie_browser=None, quality="best", write_subs=False, write_thumb=False, cookies_file=None) -> dict` — Build yt-dlp options (quality preset, impersonate=chrome136, postprocessors). Cookie wiring delegated to `yt_dlp_helpers.apply_cookies()` (file > browser > none).
   - `download_video(url, output_dir, progress_hook=None, ...) -> DownloadResult` — Single video; pre-resolves FB shortlinks; wraps `_do_download` in tenacity retry
   - `download_batch(urls, output_dir, workers=3, delay=1.0, progress_callback=None, ...) -> list[DownloadResult]` — Concurrent CLI batch (platform-aware pacing)
+
+### `yt_dlp_helpers.py`
+- **Purpose:** Shared yt-dlp option mutators kept out of `downloader.py`
+- **Functions:**
+  - `apply_cookies(ydl_opts, browser, file_path) -> None` — Mutate `ydl_opts` to add cookie source. Existing cookie file wins over browser DB; missing/empty file falls through to browser; neither set → no mutation.
 
 ### `download_engine.py`
 - **Purpose:** Qt download orchestration for GUI (queue, dedup, history, retries)

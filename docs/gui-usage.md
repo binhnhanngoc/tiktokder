@@ -136,6 +136,7 @@ Configure application behavior. Changes apply immediately.
 | Setting | Options | Notes |
 |---------|---------|-------|
 | **Cookie Browser** | None / Chrome / Firefox / Edge | Auto-extracts session from your browser |
+| **Cookies File** | path to `cookies.txt` | Netscape format; **overrides Cookie Browser** when set. Lifts anonymous rate limits on profile scrapes/downloads. Export with *Get cookies.txt LOCALLY* extension |
 
 ### Facebook Section
 | Setting | Options | Notes |

@@ -85,6 +85,48 @@ class TestLoadSaveConfig:
         assert c.workers == 2
 
 
+class TestCookiesFileMigration:
+    """Legacy `cookies_file` key migrates to `facebook_cookies_file` on load,
+    and only the new keys are emitted on save.
+    """
+
+    def test_legacy_key_migrates_to_facebook_cookies_file(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps({"cookies_file": "/path/a.txt"}),
+            encoding="utf-8",
+        )
+        with patch("config.CONFIG_PATH", config_path):
+            c = load_config()
+        assert c.facebook_cookies_file == "/path/a.txt"
+        assert c.tiktok_cookies_file is None
+
+    def test_new_key_wins_when_both_present(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {"cookies_file": "/old.txt", "facebook_cookies_file": "/new.txt"}
+            ),
+            encoding="utf-8",
+        )
+        with patch("config.CONFIG_PATH", config_path):
+            c = load_config()
+        assert c.facebook_cookies_file == "/new.txt"
+
+    def test_save_emits_only_new_keys(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        cfg = AppConfig(
+            facebook_cookies_file="/fb.txt",
+            tiktok_cookies_file="/tt.txt",
+        )
+        with patch("config.CONFIG_PATH", config_path), patch("config.CONFIG_DIR", tmp_path):
+            save_config(cfg)
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+        assert "cookies_file" not in raw
+        assert raw["facebook_cookies_file"] == "/fb.txt"
+        assert raw["tiktok_cookies_file"] == "/tt.txt"
+
+
 class TestHistory:
     """Test download history persistence."""
 

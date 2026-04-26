@@ -87,9 +87,12 @@ class AppConfig:
     workers: int = 3
     delay: float = 0.5
     cookie_browser: str | None = None
-    # Path to a Netscape-format cookies.txt — currently consumed by the
-    # Facebook scraper to bypass anonymous-only feed caps. None = no cookies.
-    cookies_file: str | None = None
+    # Path to a Netscape-format cookies.txt — consumed by the Facebook scraper
+    # (Playwright injection) and the FB yt-dlp path. None = no cookies.
+    facebook_cookies_file: str | None = None
+    # TikTok counterpart: path to Netscape cookies.txt fed to yt-dlp via
+    # `cookiefile`. Takes precedence over `cookie_browser` when both are set.
+    tiktok_cookies_file: str | None = None
     window_width: int = 900
     window_height: int = 600
     window_x: int | None = None
@@ -161,12 +164,18 @@ def get_max_retry_attempts(url: str) -> int:
 
 
 def load_config() -> AppConfig:
-    """Load config from JSON file, returning defaults if missing."""
+    """Load config from JSON file, returning defaults if missing.
+
+    Migrates legacy `cookies_file` key to `facebook_cookies_file` on read so
+    pre-rename configs keep working. The new key wins when both are present.
+    """
     if not CONFIG_PATH.exists():
         return AppConfig()
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        # Filter to only known fields
+        if "cookies_file" in data and "facebook_cookies_file" not in data:
+            data["facebook_cookies_file"] = data["cookies_file"]
+        # Filter to only known fields (drops legacy `cookies_file` after migration).
         known = {f.name for f in AppConfig.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known}
         return AppConfig(**filtered)

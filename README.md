@@ -39,7 +39,7 @@ python app.py
 GUI tabs:
 - **TikTok** — Channels (saved list + browser), Queue (TikTok-only download table), Library (uploader sidebar + filtered history).
 - **Facebook** — same composite for Facebook pages/profiles, with Playwright scraping under the hood. Scrolls spinbox (1–50, default 10) for Playwright scrape budget; "Load more" button to resume.
-- **Settings** — Global / TikTok / Facebook sections (output folder, concurrency, default quality, cookie browser, FB cookies.txt + default scrolls, etc.).
+- **Settings** — Global / TikTok / Facebook sections (output folder, concurrency, default quality, cookie browser, TikTok + FB cookies.txt, FB default scrolls, etc.).
 
 A persistent global URL bar at the top (above tabs) accepts pasted URLs or `.txt` drops; URLs auto-route to the matching platform's queue. The status bar shows per-platform queue counts and total completed downloads.
 
@@ -105,6 +105,7 @@ Settings are split into three groups: **Global**, **TikTok**, **Facebook**. All 
 | Global | Write subtitles (en) | on / off | sidecar `.srt` next to video |
 | Global | Write thumbnail | on / off | sidecar `.jpg` next to video |
 | TikTok | Cookie Browser | None / chrome / firefox / edge | auto-extracts session cookies from your browser |
+| TikTok | Cookies File | path to Netscape `cookies.txt` | optional; **overrides Cookie Browser** when set. Lifts anonymous rate limits on profile scrapes/downloads. Export via *Get cookies.txt LOCALLY* extension while logged in |
 | Facebook | Cookies File | path to Netscape `cookies.txt` | optional; lifts **10-reel cap** on anon profile scraping. Export via *Get cookies.txt LOCALLY* extension while logged in |
 | Facebook | Default Max Scrolls | 1–50 | Playwright scroll budget in Channels/Browser sub-tab |
 

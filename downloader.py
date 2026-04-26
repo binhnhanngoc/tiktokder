@@ -40,6 +40,7 @@ from config import (
     get_platform_defaults,
     get_max_retry_attempts,
 )
+from yt_dlp_helpers import apply_cookies
 from retry_policy import (
     LoginRequired,
     Private,
@@ -232,10 +233,7 @@ def get_ydl_opts(
         "socket_timeout": 30,  # Fail fast on stalled connections
         "impersonate": ImpersonateTarget("chrome", "136"),  # Bypass TLS fingerprint detection
     }
-    if cookies_file:
-        opts["cookiefile"] = cookies_file
-    elif cookie_browser:
-        opts["cookiesfrombrowser"] = (cookie_browser,)
+    apply_cookies(opts, cookie_browser, cookies_file)
     if force_overwrite:
         # Force re-download even if the destination file already exists.
         opts["overwrites"] = True

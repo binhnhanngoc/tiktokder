@@ -7,6 +7,8 @@ import yt_dlp
 from yt_dlp.networking.impersonate import ImpersonateTarget
 from PySide6.QtCore import QThread, Signal
 
+from yt_dlp_helpers import apply_cookies
+
 
 @dataclass
 class VideoInfo:
@@ -46,11 +48,15 @@ class ChannelFetcher(QThread):
         self,
         channel_url: str,
         cookie_browser: str | None = None,
+        cookies_file: str | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.channel_url = channel_url
         self.cookie_browser = cookie_browser
+        # Optional Netscape cookies.txt path. When set, takes precedence over
+        # cookie_browser — lifts anonymous rate limits on profile scrapes.
+        self.cookies_file = cookies_file
         self._cancelled = False
 
     def run(self) -> None:
@@ -62,8 +68,7 @@ class ChannelFetcher(QThread):
             "skip_download": True,
             "impersonate": ImpersonateTarget("chrome", "136"),
         }
-        if self.cookie_browser:
-            opts["cookiesfrombrowser"] = (self.cookie_browser,)
+        apply_cookies(opts, self.cookie_browser, self.cookies_file)
 
         count = 0
         try:

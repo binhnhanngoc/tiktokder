@@ -29,6 +29,7 @@ class DownloadWorker(QThread):
         write_subs: bool = False,
         write_thumb: bool = False,
         cookies_file: str | None = None,
+        tiktok_cookies_file: str | None = None,
         page_hint: str | None = None,
         parent: QObject | None = None,
     ) -> None:
@@ -41,6 +42,7 @@ class DownloadWorker(QThread):
         self.write_subs = write_subs
         self.write_thumb = write_thumb
         self.cookies_file = cookies_file
+        self.tiktok_cookies_file = tiktok_cookies_file
         self.page_hint = page_hint
         self._cancelled = False
         self._info: dict | None = None
@@ -59,11 +61,13 @@ class DownloadWorker(QThread):
 
         try:
             # FB reels need auth cookies for current extractor HTML; route the
-            # configured cookies.txt to yt-dlp on FB. Skip browser cookie DB
+            # configured FB cookies.txt to yt-dlp on FB. Skip browser cookie DB
             # for FB to avoid the locked-DB issue while Chrome/Edge is running.
+            # On TikTok, route the optional tiktok_cookies_file (file path wins
+            # over browser DB inside the helper / get_ydl_opts).
             is_fb = detect_platform(self.url) == "facebook"
             cookies = None if is_fb else self.cookie_browser
-            cookies_file = self.cookies_file if is_fb else None
+            cookies_file = self.cookies_file if is_fb else self.tiktok_cookies_file
             result, info = download_video(
                 self.url, self.output_dir,
                 progress_hook=_progress_hook,
@@ -111,6 +115,7 @@ class DownloadEngine(QObject):
         write_thumb: bool = False,
         history_max_entries: int | None = None,
         cookies_file: str | None = None,
+        tiktok_cookies_file: str | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -121,6 +126,7 @@ class DownloadEngine(QObject):
         self.delay_floor = delay_floor
         self.cookie_browser = cookie_browser
         self.cookies_file = cookies_file
+        self.tiktok_cookies_file = tiktok_cookies_file
         self.quality = quality
         self.write_subs = write_subs
         self.write_thumb = write_thumb
@@ -184,6 +190,7 @@ class DownloadEngine(QObject):
                 write_subs=self.write_subs,
                 write_thumb=self.write_thumb,
                 cookies_file=self.cookies_file,
+                tiktok_cookies_file=self.tiktok_cookies_file,
                 page_hint=self._url_to_page_hint.get(url),
                 parent=self,
             )

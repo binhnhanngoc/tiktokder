@@ -62,6 +62,7 @@ class SettingsPanel(QWidget):
         self.workers_spin.valueChanged.connect(self._save)
         self.delay_spin.valueChanged.connect(self._save)
         self.cookie_combo.currentTextChanged.connect(self._save)
+        self.tiktok_cookies_file_input.textChanged.connect(self._save)
         self.cookies_file_input.textChanged.connect(self._save)
         self.fb_scrolls_default_spin.valueChanged.connect(self._save)
         self.quality_combo.currentIndexChanged.connect(self._save)
@@ -147,6 +148,23 @@ class SettingsPanel(QWidget):
         self.cookie_combo.setToolTip("Used by yt-dlp for TikTok downloads.")
         form.addRow("Cookie Browser:", self.cookie_combo)
 
+        # cookies.txt path — overrides Cookie Browser when set. Mirrors the
+        # FB row; lifts anonymous rate limits on profile scrapes.
+        tt_cookies_row = QHBoxLayout()
+        self.tiktok_cookies_file_input = QLineEdit(config.tiktok_cookies_file or "")
+        self.tiktok_cookies_file_input.setPlaceholderText(
+            "Path to Netscape cookies.txt (optional)"
+        )
+        self.tiktok_cookies_file_input.setToolTip(
+            "Optional. Overrides Cookie Browser. Export via 'Get cookies.txt LOCALLY' "
+            "extension while logged in."
+        )
+        tt_cookies_row.addWidget(self.tiktok_cookies_file_input, stretch=1)
+        self.tiktok_cookies_browse_btn = QPushButton("Browse...")
+        self.tiktok_cookies_browse_btn.clicked.connect(self._browse_tiktok_cookies_file)
+        tt_cookies_row.addWidget(self.tiktok_cookies_browse_btn)
+        form.addRow("Cookies File:", tt_cookies_row)
+
         return group
 
     def _build_facebook_group(self, config: AppConfig) -> QGroupBox:
@@ -155,7 +173,7 @@ class SettingsPanel(QWidget):
 
         # cookies.txt path.
         cookies_row = QHBoxLayout()
-        self.cookies_file_input = QLineEdit(config.cookies_file or "")
+        self.cookies_file_input = QLineEdit(config.facebook_cookies_file or "")
         self.cookies_file_input.setPlaceholderText("Path to Netscape cookies.txt (optional)")
         self.cookies_file_input.setToolTip(
             "Export Facebook cookies with a browser extension "
@@ -204,6 +222,17 @@ class SettingsPanel(QWidget):
         if path:
             self.cookies_file_input.setText(path)
 
+    def _browse_tiktok_cookies_file(self) -> None:
+        start = self.tiktok_cookies_file_input.text() or self.config.output_dir
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select TikTok Cookies File",
+            start,
+            "Cookies (*.txt);;All files (*.*)",
+        )
+        if path:
+            self.tiktok_cookies_file_input.setText(path)
+
     @Slot()
     def _save(self) -> None:
         self.config.output_dir = self.output_dir_input.text()
@@ -211,8 +240,10 @@ class SettingsPanel(QWidget):
         self.config.delay = self.delay_spin.value()
         cookie = self.cookie_combo.currentText()
         self.config.cookie_browser = cookie if cookie != "None" else None
-        cookies_file = self.cookies_file_input.text().strip()
-        self.config.cookies_file = cookies_file or None
+        tt_cookies_file = self.tiktok_cookies_file_input.text().strip()
+        self.config.tiktok_cookies_file = tt_cookies_file or None
+        fb_cookies_file = self.cookies_file_input.text().strip()
+        self.config.facebook_cookies_file = fb_cookies_file or None
         self.config.facebook_max_scrolls_default = self.fb_scrolls_default_spin.value()
         self.config.quality_default = self.quality_combo.currentData() or "best"
         self.config.write_subtitles = self.subs_check.isChecked()
@@ -226,6 +257,7 @@ class SettingsPanel(QWidget):
         self.workers_spin.setValue(defaults.workers)
         self.delay_spin.setValue(defaults.delay)
         self.cookie_combo.setCurrentIndex(0)
+        self.tiktok_cookies_file_input.clear()
         self.cookies_file_input.clear()
         self.fb_scrolls_default_spin.setValue(defaults.facebook_max_scrolls_default)
         self._select_quality(defaults.quality_default)
