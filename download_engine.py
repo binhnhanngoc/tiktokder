@@ -17,12 +17,14 @@ class DownloadWorker(QThread):
 
     def __init__(
         self, url: str, output_dir: str, cookie_browser: str | None = None,
+        force_overwrite: bool = False,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self.url = url
         self.output_dir = output_dir
         self.cookie_browser = cookie_browser
+        self.force_overwrite = force_overwrite
         self._cancelled = False
 
     def run(self) -> None:
@@ -45,6 +47,7 @@ class DownloadWorker(QThread):
                 self.url, self.output_dir,
                 progress_hook=_progress_hook,
                 cookie_browser=cookies,
+                force_overwrite=self.force_overwrite,
             )
         except Exception as e:
             result = DownloadResult(url=self.url, success=False, error=str(e))
@@ -84,12 +87,17 @@ class DownloadEngine(QObject):
         self._queue: list[str] = []
         self._active: dict[str, DownloadWorker] = {}
         self._queued_urls: set[str] = set()  # Dedup: track all URLs ever added
+        self._forced_urls: set[str] = set()  # URLs to download with overwrite (force)
         self._completed_count = 0
         self._total_count = 0
         self._history = load_history()
 
-    def add_urls(self, urls: list[str]) -> None:
-        """Add URLs to download queue, skipping duplicates and already-downloaded."""
+    def add_urls(self, urls: list[str], force: bool = False) -> None:
+        """Add URLs to download queue, skipping duplicates and already-downloaded.
+
+        When `force=True`, the history check is bypassed and the worker is
+        instructed to overwrite any existing file on disk.
+        """
         for url in urls:
             # Skip duplicate URLs already in queue or active
             if url in self._queued_urls:
@@ -97,10 +105,12 @@ class DownloadEngine(QObject):
             self._queued_urls.add(url)
 
             vid = extract_video_id(url)
-            if vid and vid in self._history:
+            if not force and vid and vid in self._history:
                 result = DownloadResult(url=url, success=True, video_id=vid, skipped=True)
                 self.download_finished.emit(url, result)
                 continue
+            if force:
+                self._forced_urls.add(url)
             self._queue.append(url)
         self._total_count += len(urls)
         self.queue_updated.emit(len(self._queue))
@@ -111,7 +121,12 @@ class DownloadEngine(QObject):
         started = 0
         while self._queue and len(self._active) < self.max_workers:
             url = self._queue.pop(0)
-            worker = DownloadWorker(url, self.output_dir, self.cookie_browser, parent=self)
+            force = url in self._forced_urls
+            self._forced_urls.discard(url)
+            worker = DownloadWorker(
+                url, self.output_dir, self.cookie_browser,
+                force_overwrite=force, parent=self,
+            )
             worker.progress.connect(self._on_progress)
             worker.finished_download.connect(self._on_worker_finished)
             self._active[url] = worker
@@ -168,20 +183,25 @@ class DownloadEngine(QObject):
             worker.cancel()
         self.queue_updated.emit(0)
 
-    def retry_url(self, url: str) -> None:
-        """Re-queue a URL that previously finished (failed/cancelled).
+    def retry_url(self, url: str, force: bool = False) -> None:
+        """Re-queue a URL that previously finished (failed/cancelled/skipped).
 
         Removes URL from the dedup set so add_urls doesn't filter it out.
         Active downloads are left alone (caller should ensure URL is not active).
+        When `force=True`, the history check is bypassed and the file is
+        overwritten on disk.
         """
         self._queued_urls.discard(url)
-        self.add_urls([url])
+        self.add_urls([url], force=force)
 
-    def retry_urls(self, urls: list[str]) -> None:
-        """Bulk re-queue previously finished URLs."""
+    def retry_urls(self, urls: list[str], force: bool = False) -> None:
+        """Bulk re-queue previously finished URLs.
+
+        See `retry_url` for the meaning of `force`.
+        """
         for url in urls:
             self._queued_urls.discard(url)
-        self.add_urls(urls)
+        self.add_urls(urls, force=force)
 
     def clear_dedup(self, urls: list[str] | None = None) -> None:
         """Drop URLs from dedup tracking so they can be re-queued.

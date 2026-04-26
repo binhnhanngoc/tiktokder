@@ -12,6 +12,9 @@ env/
 downloads/*
 !downloads/.gitkeep
 
+# User config + history (lives next to source after migration from ~/.tiktokder)
+data/
+
 # IDE
 .vscode/
 .idea/

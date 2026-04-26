@@ -44,6 +44,10 @@ class DownloadTableWidget(QWidget):
     # Parent (MainWindow) connects this to DownloadEngine.retry_urls.
     retry_requested = Signal(list)
 
+    # Emitted when the user requests a forced re-download (bypass history,
+    # overwrite existing files). Parent connects to retry_urls(force=True).
+    force_download_requested = Signal(list)
+
     # Emitted when 'Clear All' is invoked. Parent should cancel any active
     # downloads and drop dedup tracking on the engine so URLs can be re-added.
     clear_all_requested = Signal(list)  # list of URLs being cleared
@@ -173,16 +177,27 @@ class DownloadTableWidget(QWidget):
             return
 
         data = self._row_data.get(row, {})
+        status = data.get("status")
+        url = data.get("url", "")
         menu = QMenu(self)
 
-        # Copy URL
+        # Copy URL — always available.
         copy_action = menu.addAction("Copy URL")
-        copy_action.triggered.connect(lambda: self._copy_url(data.get("url", "")))
+        copy_action.triggered.connect(lambda: self._copy_url(url))
 
-        # Retry (only for failed)
-        if data.get("status") == STATUS_FAILED:
+        # Retry: re-runs the download for terminal-state rows. Skipped rows
+        # without a force flag would just be skipped again, so only offer
+        # Retry where re-attempting can change the outcome (Failed/Cancelled).
+        if status in (STATUS_FAILED, STATUS_CANCELLED):
             retry_action = menu.addAction("Retry")
-            retry_action.triggered.connect(lambda: self._retry_url(data.get("url", "")))
+            retry_action.triggered.connect(lambda: self._retry_url(url))
+
+        # Force Download: bypasses history and overwrites files. Useful for
+        # rows that landed in Skipped/Complete (already in history) or for
+        # forcing a clean replacement of a previous failure.
+        if status in (STATUS_FAILED, STATUS_CANCELLED, STATUS_SKIPPED, STATUS_COMPLETE):
+            force_action = menu.addAction("Force Download")
+            force_action.triggered.connect(lambda: self._force_download(url))
 
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
@@ -191,16 +206,28 @@ class DownloadTableWidget(QWidget):
         if clipboard:
             clipboard.setText(url)
 
-    def _retry_url(self, url: str) -> None:
-        """Reset a failed/cancelled row to Queued and emit retry_requested."""
+    def _reset_row(self, url: str) -> bool:
+        """Reset a row's status to Queued and zero its progress bar. Returns
+        True if the row was found and reset, False otherwise.
+        """
         row = self._url_to_row.get(url)
         if row is None:
-            return
+            return False
         self._set_status(row, STATUS_QUEUED)
         bar = self.table.cellWidget(row, 2)
         if bar:
             bar.setValue(0)
-        self.retry_requested.emit([url])
+        return True
+
+    def _retry_url(self, url: str) -> None:
+        """Reset a failed/cancelled row to Queued and emit retry_requested."""
+        if self._reset_row(url):
+            self.retry_requested.emit([url])
+
+    def _force_download(self, url: str) -> None:
+        """Reset row and request a forced re-download (bypass history)."""
+        if self._reset_row(url):
+            self.force_download_requested.emit([url])
 
     def _retry_all_failed(self) -> None:
         """Bulk retry every Failed/Cancelled row in the table."""

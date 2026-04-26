@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -17,11 +18,15 @@ def _portable_root() -> Path:
     return Path(sys.executable).resolve().parent
 
 
+def _source_root() -> Path:
+    """Folder containing config.py — i.e., the project root in source runs."""
+    return Path(__file__).resolve().parent
+
+
 def _default_config_dir() -> Path:
-    """`<exe_dir>/data` in portable builds, `~/.tiktokder` in source runs."""
-    if _is_portable():
-        return _portable_root() / "data"
-    return Path.home() / ".tiktokder"
+    """`<app_root>/data` — exe dir when frozen, project root in source runs."""
+    root = _portable_root() if _is_portable() else _source_root()
+    return root / "data"
 
 
 def _default_output_dir() -> str:
@@ -34,6 +39,32 @@ def _default_output_dir() -> str:
 CONFIG_DIR = _default_config_dir()
 CONFIG_PATH = CONFIG_DIR / "config.json"
 HISTORY_PATH = CONFIG_DIR / "history.json"
+
+
+def _migrate_legacy_data_dir() -> None:
+    """Move config.json/history.json from `~/.tiktokder/` to the new app-folder
+    location. Idempotent: only moves files that don't already exist at the new
+    path, then removes the legacy folder if empty.
+    """
+    legacy = Path.home() / ".tiktokder"
+    if not legacy.exists() or legacy == CONFIG_DIR:
+        return
+    moved = False
+    for name in ("config.json", "history.json"):
+        src = legacy / name
+        dst = CONFIG_DIR / name
+        if src.exists() and not dst.exists():
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            moved = True
+    if moved:
+        try:
+            legacy.rmdir()  # only succeeds if empty — leave non-empty dirs alone
+        except OSError:
+            pass
+
+
+_migrate_legacy_data_dir()
 
 
 @dataclass

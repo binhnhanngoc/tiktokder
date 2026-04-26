@@ -76,6 +76,35 @@ class TestDownloadEngine:
         # URL should NOT be in the queue (it was skipped)
         assert len(engine._queue) == 0
 
+    def test_force_bypasses_history(self):
+        """force=True must queue the URL even when its video ID is in history."""
+        engine = DownloadEngine(output_dir="./downloads")
+        url = "https://www.tiktok.com/@user/video/1234567890123456789"
+        engine._history = {"1234567890123456789"}
+
+        skipped = []
+        engine.download_finished.connect(lambda u, r: skipped.append((u, r)))
+
+        with patch.object(engine, "_start_next"):
+            engine.add_urls([url], force=True)
+
+        assert skipped == []  # not emitted as skipped
+        assert engine._queue == [url]
+        assert url in engine._forced_urls
+
+    def test_retry_urls_force_propagates(self):
+        """retry_urls(force=True) must mark URLs as forced even if in history."""
+        engine = DownloadEngine(output_dir="./downloads")
+        url = "https://www.tiktok.com/@user/video/9999999999999999999"
+        engine._history = {"9999999999999999999"}
+        engine._queued_urls = {url}  # simulate URL was previously skipped
+
+        with patch.object(engine, "_start_next"):
+            engine.retry_urls([url], force=True)
+
+        assert engine._queue == [url]
+        assert url in engine._forced_urls
+
     def test_non_history_url_added_to_queue(self):
         """Test that URLs not in history are queued normally."""
         engine = DownloadEngine(output_dir="./downloads")

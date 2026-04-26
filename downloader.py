@@ -180,6 +180,7 @@ def get_ydl_opts(
     output_dir: str,
     cookie_browser: str | None = None,
     retries: int = 10,
+    force_overwrite: bool = False,
 ) -> dict:
     """Return yt-dlp options dict.
 
@@ -208,6 +209,9 @@ def get_ydl_opts(
     }
     if cookie_browser:
         opts["cookiesfrombrowser"] = (cookie_browser,)
+    if force_overwrite:
+        # Force re-download even if the destination file already exists.
+        opts["overwrites"] = True
     return opts
 
 
@@ -231,6 +235,7 @@ def _do_download(
     progress_hook: Callable | None = None,
     cookie_browser: str | None = None,
     retries: int = 10,
+    force_overwrite: bool = False,
 ) -> dict:
     """Inner download path: invokes yt-dlp; raises typed exception on failure.
 
@@ -248,7 +253,12 @@ def _do_download(
             logger.debug(f"Resolved shortlink {url} -> {canonical}")
             url = canonical
 
-    opts = get_ydl_opts(output_dir, cookie_browser=cookie_browser, retries=retries)
+    opts = get_ydl_opts(
+        output_dir,
+        cookie_browser=cookie_browser,
+        retries=retries,
+        force_overwrite=force_overwrite,
+    )
     if progress_hook:
         opts["progress_hooks"] = [progress_hook]
 
@@ -277,6 +287,7 @@ def download_video(
     cookie_browser: str | None = None,
     retries: int | None = None,
     max_attempts: int | None = None,
+    force_overwrite: bool = False,
 ) -> DownloadResult:
     """Download a single video.
 
@@ -302,6 +313,7 @@ def download_video(
             progress_hook=progress_hook,
             cookie_browser=cookie_browser,
             retries=retries,
+            force_overwrite=force_overwrite,
         )
 
     try:

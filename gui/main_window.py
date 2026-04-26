@@ -104,6 +104,7 @@ class MainWindow(QMainWindow):
 
         # Retry & Clear All wiring
         self.download_table.retry_requested.connect(self._on_retry_requested)
+        self.download_table.force_download_requested.connect(self._on_force_download_requested)
         self.download_table.clear_all_requested.connect(self._on_clear_all_requested)
 
         # Settings -> engine (live propagation)
@@ -147,6 +148,13 @@ class MainWindow(QMainWindow):
         """Re-queue URLs whose previous attempt failed/cancelled."""
         if urls:
             self.engine.retry_urls(urls)
+            self._update_status_count()
+
+    @Slot(list)
+    def _on_force_download_requested(self, urls: list[str]) -> None:
+        """Re-queue URLs with force=True: bypass history, overwrite files."""
+        if urls:
+            self.engine.retry_urls(urls, force=True)
             self._update_status_count()
 
     @Slot(list)
