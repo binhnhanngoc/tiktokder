@@ -7,6 +7,16 @@ import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
+from history_store import (
+    DEFAULT_MAX_ENTRIES,
+    HistoryRecord,
+    add_history_record as _add_history_record,
+    load_history_ids,
+    load_history_records as _load_history_records,
+    save_history_ids,
+    save_history_records as _save_history_records,
+)
+
 
 def _is_portable() -> bool:
     """True when running as a PyInstaller-frozen bundle (portable mode)."""
@@ -79,6 +89,10 @@ class AppConfig:
     window_height: int = 600
     window_x: int | None = None
     window_y: int | None = None
+    quality_default: str = "best"        # one of best|1080p|720p|480p|audio
+    write_subtitles: bool = False
+    write_thumbnail: bool = False
+    history_max_entries: int = DEFAULT_MAX_ENTRIES
 
 
 @dataclass(frozen=True)
@@ -163,20 +177,50 @@ def save_config(config: AppConfig) -> None:
 
 
 def load_history() -> set[str]:
-    """Load downloaded video IDs from history file."""
-    if not HISTORY_PATH.exists():
-        return set()
-    try:
-        data = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-        return set(data) if isinstance(data, list) else set()
-    except (json.JSONDecodeError, TypeError):
-        return set()
+    """Load downloaded video IDs from history file (v1 or v2)."""
+    return load_history_ids(HISTORY_PATH)
 
 
 def save_history(ids: set[str]) -> None:
-    """Save downloaded video IDs to history file."""
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    HISTORY_PATH.write_text(
-        json.dumps(sorted(ids), indent=2),
-        encoding="utf-8",
-    )
+    """Save downloaded video IDs to history file (writes v2 with bare records)."""
+    save_history_ids(HISTORY_PATH, ids)
+
+
+def load_history_records() -> list[HistoryRecord]:
+    """Return full HistoryRecord list (empty if file absent or v1 minimal)."""
+    return _load_history_records(HISTORY_PATH)
+
+
+def save_history_records(records: list[HistoryRecord]) -> None:
+    """Persist HistoryRecord list as schema v2 atomically."""
+    _save_history_records(HISTORY_PATH, records)
+
+
+def add_history_record(record: HistoryRecord, max_entries: int | None = None) -> None:
+    """Append a record; FIFO-trim to ``max_entries`` (defaults to AppConfig limit)."""
+    cap = max_entries if max_entries is not None else DEFAULT_MAX_ENTRIES
+    _add_history_record(HISTORY_PATH, record, max_entries=cap)
+
+
+__all__ = [
+    "AppConfig",
+    "HistoryRecord",
+    "PlatformDefaults",
+    "TIKTOK_DEFAULTS",
+    "FACEBOOK_DEFAULTS",
+    "MAX_RETRY_ATTEMPTS_TIKTOK",
+    "MAX_RETRY_ATTEMPTS_FACEBOOK",
+    "FB_LOGIN_WALL_MARKERS",
+    "CONFIG_DIR",
+    "CONFIG_PATH",
+    "HISTORY_PATH",
+    "get_platform_defaults",
+    "get_max_retry_attempts",
+    "load_config",
+    "save_config",
+    "load_history",
+    "save_history",
+    "load_history_records",
+    "save_history_records",
+    "add_history_record",
+]

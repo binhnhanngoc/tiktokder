@@ -113,6 +113,7 @@ class TestHistory:
         assert h == set()
 
     def test_history_persists_sorted(self, tmp_path):
+        """save_history writes schema v2 with bare records, ordered by id."""
         history_path = tmp_path / "history.json"
         history_dir = tmp_path
         ids = {"c_id", "a_id", "b_id"}
@@ -121,7 +122,9 @@ class TestHistory:
             save_history(ids)
 
         data = json.loads(history_path.read_text(encoding="utf-8"))
-        assert data == ["a_id", "b_id", "c_id"]
+        assert data["schema"] == 2
+        ordered = [entry["video_id"] for entry in data["entries"]]
+        assert ordered == ["a_id", "b_id", "c_id"]
 
     def test_empty_history(self, tmp_path):
         history_path = tmp_path / "history.json"
