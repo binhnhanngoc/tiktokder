@@ -49,6 +49,7 @@ def _default_output_dir() -> str:
 CONFIG_DIR = _default_config_dir()
 CONFIG_PATH = CONFIG_DIR / "config.json"
 HISTORY_PATH = CONFIG_DIR / "history.json"
+STATE_PATH = CONFIG_DIR / "state.json"
 
 
 def _migrate_legacy_data_dir() -> None:
@@ -218,6 +219,7 @@ __all__ = [
     "CONFIG_DIR",
     "CONFIG_PATH",
     "HISTORY_PATH",
+    "STATE_PATH",
     "get_platform_defaults",
     "get_max_retry_attempts",
     "load_config",

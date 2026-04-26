@@ -84,3 +84,19 @@ class ChannelBrowser(QWidget):
         """Propagate cookies.txt path to the Facebook panel (TikTok ignores it)."""
         self.cookies_file = value
         self.facebook_panel.cookies_file = value
+
+    # --- persistence --------------------------------------------------------------
+
+    def snapshot(self):
+        """Return ``(active_sub_tab_index, tiktok_state, facebook_state)``."""
+        return (
+            self._tabs.currentIndex(),
+            self.tiktok_panel.snapshot(),
+            self.facebook_panel.snapshot(),
+        )
+
+    def load_from_state(self, active_sub_tab: int, tiktok_state, facebook_state) -> None:
+        self.tiktok_panel.load_from_state(tiktok_state)
+        self.facebook_panel.load_from_state(facebook_state)
+        if 0 <= active_sub_tab < self._tabs.count():
+            self._tabs.setCurrentIndex(active_sub_tab)

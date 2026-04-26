@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
+from app_state import QueueItemState
 from downloader import DownloadResult
 from gui.icons import icon
 from gui.tokens import token
@@ -329,3 +330,63 @@ class DownloadTableWidget(QWidget):
     def get_total_count(self) -> int:
         """Return total number of downloads in table."""
         return self.table.rowCount()
+
+    # --- persistence --------------------------------------------------------------
+
+    def snapshot(self) -> list[QueueItemState]:
+        """Return a serializable snapshot of every row, in display order."""
+        items: list[QueueItemState] = []
+        for row in range(self.table.rowCount()):
+            data = self._row_data.get(row, {})
+            url = data.get("url")
+            if not url:
+                continue
+            title_item = self.table.item(row, 0)
+            title = title_item.text() if title_item else None
+            # Title cell defaults to URL — collapse that back to None so on
+            # restore we don't display the URL twice.
+            if title == url:
+                title = None
+            items.append(
+                QueueItemState(
+                    url=url,
+                    status=data.get("status", STATUS_QUEUED),
+                    title=title,
+                )
+            )
+        return items
+
+    def load_from_state(self, items: list[QueueItemState]) -> None:
+        """Repopulate the table from a persisted snapshot.
+
+        In-flight statuses (Downloading) are downgraded to Cancelled — the
+        worker died with the previous app instance, so the row is no longer
+        actively making progress.
+        """
+        for item in items:
+            url = item.url
+            if not url or url in self._url_to_row:
+                continue
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self._url_to_row[url] = row
+
+            display_title = item.title or url
+            title_item = QTableWidgetItem(display_title)
+            title_item.setFlags(title_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 0, title_item)
+
+            status = item.status
+            if status == STATUS_DOWNLOADING:
+                status = STATUS_CANCELLED
+            elif status not in _STATUS_TOKENS:
+                status = STATUS_QUEUED
+            self._row_data[row] = {"url": url, "status": status, "filepath": None}
+            self._set_status(row, status)
+
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(100 if status == STATUS_COMPLETE else 0)
+            self.table.setCellWidget(row, 2, bar)
+
+            self.table.setItem(row, 3, QTableWidgetItem("—"))

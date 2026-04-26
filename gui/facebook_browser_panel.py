@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QPushButton, QSpinBox, QWidget
 
+from app_state import BrowserPanelState
 from facebook_fetcher import FacebookFetcher, PLAYWRIGHT_AVAILABLE
 from gui.base_browser_panel import BaseBrowserPanel
 from gui.icons import icon
@@ -97,3 +98,18 @@ class FacebookBrowserPanel(BaseBrowserPanel):
                 f"Found {cumulative} videos total (+{total} this fetch)"
             )
         self.load_more_btn.setEnabled(cumulative > 0)
+
+    # --- persistence --------------------------------------------------------------
+
+    def snapshot(self) -> BrowserPanelState:
+        state = super().snapshot()
+        state.max_scrolls = self.scrolls_spin.value()
+        return state
+
+    def load_from_state(self, state: BrowserPanelState) -> None:
+        super().load_from_state(state)
+        if state.max_scrolls is not None:
+            self.scrolls_spin.setValue(state.max_scrolls)
+        # Restored rows mean the user previously fetched something — re-enable
+        # Load more so they can resume scrolling without a fresh Browse.
+        self.load_more_btn.setEnabled(bool(self._videos))

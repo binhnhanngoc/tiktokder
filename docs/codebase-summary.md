@@ -11,6 +11,7 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 - **External Dependencies:** 6 (yt-dlp, PySide6, Rich, pytest, PyInstaller, Playwright)
 
 ### v1.2.0 additions
+- `app_state.py` — UI state persistence (Download queue + Channel/Page browse snapshots) in `data/state.json`. Loaded by `app.py` on launch, restored by `MainWindow._restore_state`, captured by `MainWindow.snapshot_state` on close. Tolerant load (malformed/missing/unknown fields → defaults). 14 tests in `test_app_state.py`.
 - `history_store.py` — schema-v2 history persistence with v1 auto-migration, atomic writes, FIFO cap.
 - `path_builder.py` — pure helpers for slugify + platform/uploader-aware yt-dlp `outtmpl`.
 - `gui/history_tab.py` — 4th top-level tab with rich record list, search, platform filter, stats, context menu.

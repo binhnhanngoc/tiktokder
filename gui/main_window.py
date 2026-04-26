@@ -14,9 +14,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app_state import AppState, clear_state_section
 from config import (
     AppConfig,
     HistoryRecord,
+    STATE_PATH,
     load_history_records,
     save_history_records,
 )
@@ -40,9 +42,15 @@ def _resolve_icon() -> QIcon:
 class MainWindow(QMainWindow):
     """TikTokDer main window with Download, Channel, History, and Settings tabs."""
 
-    def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        state: AppState | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.config = config
+        self._initial_state = state or AppState()
 
         self.setWindowTitle("TikTokDer")
         self.setWindowIcon(_resolve_icon())
@@ -95,6 +103,9 @@ class MainWindow(QMainWindow):
 
         # Wire signals
         self._connect_signals()
+
+        # Restore persisted UI state (queue rows, channel browser snapshots).
+        self._restore_state(self._initial_state)
 
     def _connect_signals(self) -> None:
         """Connect all component signals to slots."""
@@ -219,6 +230,12 @@ class MainWindow(QMainWindow):
         self.engine.cancel_all()
         self.engine.clear_dedup(urls)
         self._update_status_count()
+        # Wipe the persisted queue immediately so a crash before close
+        # doesn't resurrect the cleared rows on next launch.
+        try:
+            clear_state_section(STATE_PATH, clear_queue=True)
+        except OSError:
+            pass
 
     @Slot(str)
     def _on_history_redownload(self, url: str) -> None:
@@ -284,3 +301,29 @@ class MainWindow(QMainWindow):
         self.resize(self.config.window_width, self.config.window_height)
         if self.config.window_x is not None and self.config.window_y is not None:
             self.move(self.config.window_x, self.config.window_y)
+
+    def _restore_state(self, state: AppState) -> None:
+        """Replay persisted UI state into the freshly built widgets."""
+        if state.download_queue:
+            self.download_table.load_from_state(state.download_queue)
+            self._update_status_count()
+
+        self.channel_browser.load_from_state(
+            state.channel_active_sub_tab,
+            state.tiktok_browser,
+            state.facebook_browser,
+        )
+
+        if 0 <= state.active_tab_index < self.tabs.count():
+            self.tabs.setCurrentIndex(state.active_tab_index)
+
+    def snapshot_state(self) -> AppState:
+        """Capture current UI state for persistence on close."""
+        active_sub_tab, tiktok_state, facebook_state = self.channel_browser.snapshot()
+        return AppState(
+            active_tab_index=self.tabs.currentIndex(),
+            channel_active_sub_tab=active_sub_tab,
+            download_queue=self.download_table.snapshot(),
+            tiktok_browser=tiktok_state,
+            facebook_browser=facebook_state,
+        )

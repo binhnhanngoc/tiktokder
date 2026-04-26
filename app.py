@@ -7,7 +7,8 @@ from pathlib import Path
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
-from config import load_config, save_config
+from app_state import load_state, save_state
+from config import STATE_PATH, load_config, save_config
 
 
 def _icon_path() -> str:
@@ -30,6 +31,7 @@ def main() -> None:
         app.setWindowIcon(QIcon(icon_file))
 
     config = load_config()
+    state = load_state(STATE_PATH)
 
     # Apply theme before constructing the window to avoid a flash on first paint.
     from gui import theme
@@ -38,7 +40,7 @@ def main() -> None:
     # Import here to avoid circular imports during setup
     from gui.main_window import MainWindow
 
-    window = MainWindow(config)
+    window = MainWindow(config, state=state)
     window.show()
 
     exit_code = app.exec()
@@ -50,6 +52,12 @@ def main() -> None:
     config.window_x = geo.x()
     config.window_y = geo.y()
     save_config(config)
+
+    # Persist UI state (queue snapshot, channel browser, active tab).
+    try:
+        save_state(STATE_PATH, window.snapshot_state())
+    except OSError:
+        pass
 
     sys.exit(exit_code)
 

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app_state import BrowserPanelState, VideoInfoState
 from channel_fetcher import VideoInfo
 from gui.icons import icon
 
@@ -187,3 +188,52 @@ class BaseBrowserPanel(QWidget):
         if len(date_str) == 8:
             return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
         return date_str
+
+    # --- persistence --------------------------------------------------------------
+
+    def snapshot(self) -> BrowserPanelState:
+        """Return serializable panel state (URL + currently shown videos).
+
+        Subclasses may override to capture extra fields (e.g. Facebook's
+        max-scrolls spinbox) by calling ``super().snapshot()`` and mutating
+        the returned dataclass.
+        """
+        videos = [
+            VideoInfoState(
+                url=v.url,
+                title=v.title or "",
+                duration=v.duration,
+                view_count=v.view_count,
+                upload_date=v.upload_date,
+                video_id=v.video_id or "",
+                quality=v.quality,
+            )
+            for v in self._videos
+        ]
+        return BrowserPanelState(
+            url=self.url_input.text().strip(),
+            videos=videos,
+        )
+
+    def load_from_state(self, state: BrowserPanelState) -> None:
+        """Restore URL field and rebuild the video table from ``state``.
+
+        Does NOT trigger a new fetch — fetches are slow and may be unwanted
+        on launch. The user can hit Browse manually if they want fresh data.
+        """
+        self.url_input.setText(state.url or "")
+        self._videos.clear()
+        self.table.setRowCount(0)
+        for v in state.videos:
+            video = VideoInfo(
+                url=v.url,
+                title=v.title or "Untitled",
+                duration=v.duration,
+                view_count=v.view_count,
+                upload_date=v.upload_date,
+                video_id=v.video_id or "",
+                quality=v.quality,
+            )
+            self._on_video_found(video)
+        if self._videos:
+            self.status_label.setText(f"Restored {len(self._videos)} videos")
