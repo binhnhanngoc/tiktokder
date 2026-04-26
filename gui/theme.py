@@ -21,7 +21,7 @@ import darkdetect
 import qdarktheme
 from PySide6.QtCore import QObject, Signal, Slot
 
-from gui import tokens
+from gui import progress_styles, tokens
 
 
 ACCENT = "#4F46E5"
@@ -70,6 +70,8 @@ def apply(mode: str) -> None:
 
     palette = mode if mode in ("light", "dark") else _resolved_palette()
     tokens.set_mode(palette)
+    # Repaint any progress bars that registered themselves with the new palette.
+    progress_styles.refresh_all()
 
 
 def _start_listener_if_needed(mode: str) -> None:

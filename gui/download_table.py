@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from app_state import QueueItemState
 from downloader import DownloadResult
+from gui import progress_styles
 from gui._history_helpers import reveal_in_file_manager
 from gui.icons import icon
 from gui.tokens import token
@@ -122,6 +123,7 @@ class DownloadTableWidget(QWidget):
         bar = QProgressBar()
         bar.setRange(0, 100)
         bar.setValue(0)
+        progress_styles.apply(bar, "determinate", "normal")
         self.table.setCellWidget(row, 2, bar)
 
         # Size placeholder
@@ -150,15 +152,20 @@ class DownloadTableWidget(QWidget):
         if row is None:
             return
 
+        bar = self.table.cellWidget(row, 2)
         if result.skipped:
             self._set_status(row, STATUS_SKIPPED)
+            if bar:
+                progress_styles.set_state(bar, "muted")
         elif result.success:
             self._set_status(row, STATUS_COMPLETE)
-            bar = self.table.cellWidget(row, 2)
             if bar:
                 bar.setValue(100)
+                progress_styles.set_state(bar, "success")
         else:
             self._set_status(row, STATUS_FAILED)
+            if bar:
+                progress_styles.set_state(bar, "error")
 
         # Update title if available
         if result.title:
@@ -401,6 +408,15 @@ class DownloadTableWidget(QWidget):
             bar = QProgressBar()
             bar.setRange(0, 100)
             bar.setValue(100 if status == STATUS_COMPLETE else 0)
+            if status == STATUS_COMPLETE:
+                restored_state = "success"
+            elif status == STATUS_FAILED:
+                restored_state = "error"
+            elif status in (STATUS_SKIPPED, STATUS_CANCELLED):
+                restored_state = "muted"
+            else:
+                restored_state = "normal"
+            progress_styles.apply(bar, "determinate", restored_state)
             self.table.setCellWidget(row, 2, bar)
 
             self.table.setItem(row, 3, QTableWidgetItem("—"))

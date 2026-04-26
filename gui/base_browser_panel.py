@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from app_state import BrowserPanelState, VideoInfoState
 from channel_fetcher import VideoInfo
+from gui import progress_styles
 from gui.icons import icon
 
 _HEADERS = ("", "Title", "Duration", "Quality", "Views", "Date")
@@ -82,6 +83,7 @@ class BaseBrowserPanel(QWidget):
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setVisible(False)
+        progress_styles.apply(self.progress_bar, "indeterminate", "normal")
         layout.addWidget(self.progress_bar)
 
         self.status_label = QLabel("")
