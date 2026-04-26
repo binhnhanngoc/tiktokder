@@ -189,7 +189,7 @@ A persistent `GlobalUrlBar` sits above the tab widget; a `StatusBarWidget` shows
 **Key Classes:**
 - `PlatformTab(platform, browser_panel, store, store_path)` — three-sub-tab QTabWidget (Channels / Queue / Library); drag-drop filtered to own platform.
 - `SavedChannelsPanel` — saved-channel list above an injected browser panel; right-click for Browse/Refresh, Download all new (confirm dialog >10), Rename + notes, Edit URL, Star/Unstar, Remove.
-- `LibraryPanel` — two-pane uploader sidebar + filtered history table; ★ marks uploaders with saved channels; right-click for Open file / Open folder / Re-download / Copy URL / Remove.
+- `LibraryPanel` — two-pane uploader sidebar + filtered history table; ★ marks uploaders with saved channels; right-click for Open file / Open folder / Re-download / Copy URL / Remove. **All columns sortable by header click** (Size numeric, default Date desc). **Compact filter row**: Quality dropdown, From/To date pickers (toggleable), Size ≥ MB threshold, Status (Available/Missing via `os.path.exists`). All filters share 200ms debounce with search box.
 
 #### 13. `gui/settings_panel.py`
 **Purpose:** Application configuration interface

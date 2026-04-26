@@ -1,5 +1,9 @@
 # Project Changelog
 
+## [1.3.1] — 2026-04-27 — Library panel sort & filters
+- **Library**: All columns now sortable by header click (Size sorts by raw bytes, default Date desc)
+- **Library**: Added compact filter row — Quality dropdown, Date range (From/To) with toggles, Size ≥ MB threshold, Status (Available/Missing via file scan). All filters debounced 200ms.
+
 ## [1.3.0] — 2026-04-26 — Platform-first UI restructure
 
 ### Added

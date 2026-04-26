@@ -1,8 +1,17 @@
-"""Library — uploader sidebar (left) + filtered history table (right).
+"""Library — uploader sidebar (left) + filtered/sortable history table (right).
 
 Per-platform: filters records to `record.platform == self.platform` so the
 whole tab is platform-scoped. The Platform column from the legacy HistoryTab
 is dropped — redundant under platform-first IA.
+
+Sort: header click on any column. Default: Date desc (newest-first). Size
+column uses a NumericItem subclass so byte-counts compare numerically rather
+than as their human-readable text.
+
+Filters: search box (existing) + uploader sidebar (existing) + a compact
+filter row with Quality dropdown, From/To date range (each toggleable), Size
+threshold (≥ MB), and Status (Available/Missing — derived via
+`os.path.exists`).
 """
 
 from __future__ import annotations
@@ -11,9 +20,12 @@ import os
 from collections import Counter
 from urllib.parse import urlparse
 
-from PySide6.QtCore import QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QDate, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDateEdit,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -21,6 +33,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -39,6 +52,23 @@ from saved_channels_store import SavedChannelsStore
 
 _HEADERS = ("Title", "Quality", "Size", "Date", "Path")
 _ALL_LABEL = "All"
+
+# Column indices — single source of truth for sort/render code.
+_COL_TITLE = 0
+_COL_QUALITY = 1
+_COL_SIZE = 2
+_COL_DATE = 3
+_COL_PATH = 4
+
+# Sensible default widths in px. Path is the stretch column so its number is
+# only the lower bound — Qt grows it to fill the panel.
+_DEFAULT_WIDTHS = {
+    _COL_TITLE: 320,
+    _COL_QUALITY: 80,
+    _COL_SIZE: 90,
+    _COL_DATE: 130,
+    _COL_PATH: 240,
+}
 
 
 def _uploader_from_url(url: str | None) -> str | None:
@@ -61,8 +91,25 @@ def _uploader_from_url(url: str | None) -> str | None:
     return first or None
 
 
+class _NumericItem(QTableWidgetItem):
+    """Table item that sorts by a stored numeric value, displays an arbitrary string.
+
+    Used for the Size column so "1.5 MB" and "900 KB" compare by bytes rather
+    than alphabetically.
+    """
+
+    def __init__(self, value: int, display: str) -> None:
+        super().__init__(display)
+        self._sort_value = value
+
+    def __lt__(self, other: object) -> bool:  # type: ignore[override]
+        if isinstance(other, _NumericItem):
+            return self._sort_value < other._sort_value
+        return super().__lt__(other)  # type: ignore[arg-type]
+
+
 class LibraryPanel(QWidget):
-    """Two-pane Library — uploader sidebar + history table."""
+    """Two-pane Library — uploader sidebar + filtered/sortable history table."""
 
     redownload_requested = Signal(str)         # url
     remove_history_requested = Signal(str)     # video_id
@@ -89,10 +136,12 @@ class LibraryPanel(QWidget):
         self.sidebar.itemClicked.connect(self._on_uploader_clicked)
         splitter.addWidget(self.sidebar)
 
-        # Right pane — search + table.
+        # Right pane — filter row + search + table.
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+
+        right_layout.addLayout(self._build_filter_row())
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search title, URL...")
@@ -103,7 +152,18 @@ class LibraryPanel(QWidget):
 
         self.table = QTableWidget(0, len(_HEADERS))
         self.table.setHorizontalHeaderLabels(list(_HEADERS))
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
+        # All Interactive so the user can drag-resize any column — including
+        # Title, which used to be Stretch and silently refused to shrink.
+        # Last section stretches so Path absorbs leftover horizontal space.
+        for col in range(len(_HEADERS)):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            self.table.setColumnWidth(col, _DEFAULT_WIDTHS[col])
+        header.setStretchLastSection(True)
+
+        self.table.setSortingEnabled(True)
+        self.table.sortByColumn(_COL_DATE, Qt.SortOrder.DescendingOrder)
+
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -114,21 +174,95 @@ class LibraryPanel(QWidget):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
 
-        # Debounced search (200 ms).
+        # Debounced filter (200 ms). Single timer for search + every filter
+        # control — they all funnel into _apply_filters() which re-runs the
+        # entire predicate chain anyway.
         self._search_timer = QTimer(self)
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(200)
         self._search_timer.timeout.connect(self._apply_filters)
         self.search_input.textChanged.connect(lambda _t: self._search_timer.start())
 
+    # ── filter row ────────────────────────────────────────────────────────
+
+    def _build_filter_row(self) -> QHBoxLayout:
+        """Create Quality / From / To / Size / Status controls in a single row."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItem("Quality: All", None)
+        row.addWidget(self.quality_combo)
+
+        self.from_date_check = QCheckBox("From")
+        self.from_date_edit = QDateEdit()
+        self.from_date_edit.setCalendarPopup(True)
+        self.from_date_edit.setDate(QDate.currentDate().addMonths(-1))
+        self.from_date_edit.setEnabled(False)
+        self.from_date_check.toggled.connect(self.from_date_edit.setEnabled)
+        row.addWidget(self.from_date_check)
+        row.addWidget(self.from_date_edit)
+
+        self.to_date_check = QCheckBox("To")
+        self.to_date_edit = QDateEdit()
+        self.to_date_edit.setCalendarPopup(True)
+        self.to_date_edit.setDate(QDate.currentDate())
+        self.to_date_edit.setEnabled(False)
+        self.to_date_check.toggled.connect(self.to_date_edit.setEnabled)
+        row.addWidget(self.to_date_check)
+        row.addWidget(self.to_date_edit)
+
+        self.size_min_spin = QSpinBox()
+        self.size_min_spin.setRange(0, 100_000)
+        self.size_min_spin.setSuffix(" MB")
+        # specialValueText replaces the displayed value at minimum (0). Lets
+        # us show "Min: any" for 0 while keeping a plain int model.
+        self.size_min_spin.setSpecialValueText("Min: any")
+        row.addWidget(self.size_min_spin)
+
+        self.status_combo = QComboBox()
+        self.status_combo.addItem("Status: All", "all")
+        self.status_combo.addItem("Available", "available")
+        self.status_combo.addItem("Missing", "missing")
+        row.addWidget(self.status_combo)
+
+        row.addStretch()
+
+        # Wire every control through the same debounce as the search box.
+        for sig in (
+            self.quality_combo.currentIndexChanged,
+            self.from_date_check.toggled,
+            self.from_date_edit.dateChanged,
+            self.to_date_check.toggled,
+            self.to_date_edit.dateChanged,
+            self.size_min_spin.valueChanged,
+            self.status_combo.currentIndexChanged,
+        ):
+            sig.connect(lambda *_: self._search_timer.start())
+
+        return row
+
+    def _rebuild_quality_combo(self) -> None:
+        """Repopulate Quality combo from observed values, preserving selection."""
+        current = self.quality_combo.currentData()
+        self.quality_combo.blockSignals(True)
+        self.quality_combo.clear()
+        self.quality_combo.addItem("Quality: All", None)
+        for q in sorted({r.quality for r in self._records if r.quality}):
+            self.quality_combo.addItem(q, q)
+        idx = self.quality_combo.findData(current)
+        self.quality_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.quality_combo.blockSignals(False)
+
     # ── public API ────────────────────────────────────────────────────────
 
     @Slot()
     def refresh(self) -> None:
-        """Re-read history file and rebuild sidebar + table."""
+        """Re-read history file and rebuild sidebar + quality combo + table."""
         records = load_history_records()
         self._records = [r for r in records if r.platform == self.platform]
         self._rebuild_sidebar()
+        self._rebuild_quality_combo()
         self._apply_filters()
 
     def set_active_uploader(self, name: str | None) -> None:
@@ -189,6 +323,20 @@ class LibraryPanel(QWidget):
 
     def _apply_filters(self) -> None:
         needle = self.search_input.text().strip().lower()
+        quality_filter = self.quality_combo.currentData()
+        from_iso = (
+            self.from_date_edit.date().toString("yyyy-MM-dd")
+            if self.from_date_check.isChecked()
+            else None
+        )
+        to_iso = (
+            self.to_date_edit.date().toString("yyyy-MM-dd")
+            if self.to_date_check.isChecked()
+            else None
+        )
+        size_min_bytes = self.size_min_spin.value() * 1024 * 1024
+        status_mode = self.status_combo.currentData() or "all"
+
         rows = []
         for r in self._records:
             if self._active_uploader and r.uploader != self._active_uploader:
@@ -197,21 +345,48 @@ class LibraryPanel(QWidget):
                 hay = " ".join(filter(None, [r.title, r.uploader, r.url])).lower()
                 if needle not in hay:
                     continue
+            if quality_filter and (r.quality or "") != quality_filter:
+                continue
+            # downloaded_at is ISO8601 ("2026-04-26T10:00:00+07:00") — slice
+            # the date prefix so we can compare with from_iso/to_iso directly.
+            rec_date = (r.downloaded_at or "")[:10]
+            if from_iso and (not rec_date or rec_date < from_iso):
+                continue
+            if to_iso and (not rec_date or rec_date > to_iso):
+                continue
+            if size_min_bytes > 0 and (r.size_bytes or 0) < size_min_bytes:
+                continue
+            if status_mode != "all":
+                exists = bool(r.file_path) and os.path.exists(r.file_path)
+                if status_mode == "available" and not exists:
+                    continue
+                if status_mode == "missing" and exists:
+                    continue
             rows.append(r)
         self._render_table(rows)
         self._render_stats(rows)
 
     def _render_table(self, records: list[HistoryRecord]) -> None:
+        # Disable sorting during bulk insert — Qt would otherwise re-sort
+        # after every insertRow, which is O(n log n) per row. Re-enabling
+        # restores the indicator and triggers a single sort over the final
+        # set.
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
         for rec in records:
             row = self.table.rowCount()
             self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(rec.title or "—"))
-            self.table.setItem(row, 1, QTableWidgetItem(rec.quality or "—"))
-            self.table.setItem(row, 2, QTableWidgetItem(format_size(rec.size_bytes)))
-            self.table.setItem(row, 3, QTableWidgetItem(format_date(rec.downloaded_at)))
-            self.table.setItem(row, 4, QTableWidgetItem(rec.file_path or "—"))
-            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, rec)
+            self.table.setItem(row, _COL_TITLE, QTableWidgetItem(rec.title or "—"))
+            self.table.setItem(row, _COL_QUALITY, QTableWidgetItem(rec.quality or "—"))
+            self.table.setItem(
+                row,
+                _COL_SIZE,
+                _NumericItem(rec.size_bytes or 0, format_size(rec.size_bytes)),
+            )
+            self.table.setItem(row, _COL_DATE, QTableWidgetItem(format_date(rec.downloaded_at)))
+            self.table.setItem(row, _COL_PATH, QTableWidgetItem(rec.file_path or "—"))
+            self.table.item(row, _COL_TITLE).setData(Qt.ItemDataRole.UserRole, rec)
+        self.table.setSortingEnabled(True)
 
     def _render_stats(self, records: list[HistoryRecord]) -> None:
         total = len(records)
@@ -225,7 +400,7 @@ class LibraryPanel(QWidget):
         row = self.table.rowAt(pos.y())
         if row < 0:
             return
-        item = self.table.item(row, 0)
+        item = self.table.item(row, _COL_TITLE)
         rec: HistoryRecord | None = item.data(Qt.ItemDataRole.UserRole) if item else None
         if rec is None:
             return

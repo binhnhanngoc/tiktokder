@@ -11,7 +11,7 @@ A Python desktop and CLI tool for batch-downloading videos from TikTok and Faceb
 - **Download Modes** — Single URL, batch files, user profiles, Facebook pages
 - **Platform-First UI** — Top-level **TikTok** and **Facebook** tabs, each with Channels (saved list) / Queue / Library sub-tabs; persistent global URL bar auto-routes pasted URLs by platform; status bar shows per-platform queue + done badges
 - **Saved Channels** — Save channels/pages with optional nicknames; right-click for `Download all new` (filters out already-downloaded and pre-cutoff videos)
-- **Library View** — Per-platform two-pane: uploader sidebar (★ marks saved channels) on the left, filtered history on the right; right-click rows to open file, open folder, re-download, copy URL, or remove
+- **Library View** — Per-platform two-pane: uploader sidebar (★ marks saved channels) on the left, sorted/filtered history on the right; sort any column, filter by quality / date range / size / file status; right-click rows to open file, open folder, re-download, copy URL, or remove
 - **Quality Selector** — Default Quality setting (`Best`, `1080p`, `720p`, `480p`, `Audio only`) plus optional subtitle (`en`) and thumbnail downloads
 - **Concurrent Downloads** — ThreadPoolExecutor with configurable workers (default: 3)
 - **Per-uploader Folder Layout** — Output organized as `downloads/{platform}/{uploader}/{id}_{title}.{ext}`
