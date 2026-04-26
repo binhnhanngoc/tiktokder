@@ -122,3 +122,62 @@ class TestDownloadEngine:
 
         assert len(engine._history) == 0
         mock_save.assert_not_called()
+
+    def test_add_urls_dedups_repeats(self):
+        """Re-adding the same URL while it's tracked should not double-queue."""
+        engine = DownloadEngine(output_dir="./downloads")
+        engine._history = set()
+
+        with patch.object(engine, "_start_next"):
+            engine.add_urls(["http://a.com/1"])
+            engine.add_urls(["http://a.com/1"])
+
+        assert len(engine._queue) == 1
+
+    def test_retry_url_re_queues_after_failure(self):
+        """retry_url must drop the dedup entry and re-queue the URL."""
+        engine = DownloadEngine(output_dir="./downloads")
+        engine._history = set()
+
+        with patch.object(engine, "_start_next"):
+            engine.add_urls(["http://a.com/1"])
+            # Simulate the engine finishing the URL (worker would have removed
+            # itself from _active, but the URL stays in _queued_urls dedup set).
+            engine._queue.clear()
+            assert "http://a.com/1" in engine._queued_urls
+
+            engine.retry_url("http://a.com/1")
+
+        assert len(engine._queue) == 1
+        assert engine._queue[0] == "http://a.com/1"
+
+    def test_retry_urls_bulk(self):
+        """retry_urls should re-queue every URL passed in."""
+        engine = DownloadEngine(output_dir="./downloads")
+        engine._history = set()
+
+        with patch.object(engine, "_start_next"):
+            engine.add_urls(["http://a.com/1", "http://b.com/2"])
+            engine._queue.clear()  # simulate both finished
+
+            engine.retry_urls(["http://a.com/1", "http://b.com/2"])
+
+        assert len(engine._queue) == 2
+
+    def test_clear_dedup_specific_urls(self):
+        """clear_dedup with explicit URLs should remove only those entries."""
+        engine = DownloadEngine(output_dir="./downloads")
+        engine._queued_urls = {"http://a.com/1", "http://b.com/2"}
+
+        engine.clear_dedup(["http://a.com/1"])
+
+        assert engine._queued_urls == {"http://b.com/2"}
+
+    def test_clear_dedup_all(self):
+        """clear_dedup() with no args wipes the entire dedup set."""
+        engine = DownloadEngine(output_dir="./downloads")
+        engine._queued_urls = {"http://a.com/1", "http://b.com/2"}
+
+        engine.clear_dedup()
+
+        assert engine._queued_urls == set()

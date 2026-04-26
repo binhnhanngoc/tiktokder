@@ -1,6 +1,11 @@
 """Main application window with tab layout, wiring all components together."""
 
+import os
+import sys
+from pathlib import Path
+
 from PySide6.QtCore import Slot
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QMainWindow,
     QTabWidget,
@@ -18,6 +23,15 @@ from gui.channel_browser import ChannelBrowser
 from gui.settings_panel import SettingsPanel
 
 
+def _resolve_icon() -> QIcon:
+    """Locate icon.ico in source tree or PyInstaller bundle; empty QIcon if missing."""
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__))
+    )
+    path = Path(base) / "assets" / "icon.ico"
+    return QIcon(str(path)) if path.exists() else QIcon()
+
+
 class MainWindow(QMainWindow):
     """TikTokDer main window with Download, Channel, and Settings tabs."""
 
@@ -26,6 +40,7 @@ class MainWindow(QMainWindow):
         self.config = config
 
         self.setWindowTitle("TikTokDer")
+        self.setWindowIcon(_resolve_icon())
         self._restore_geometry()
         self._setup_menu()
 
@@ -87,6 +102,10 @@ class MainWindow(QMainWindow):
         # Cancel all button
         self.download_table.cancel_all_btn.clicked.connect(self.engine.cancel_all)
 
+        # Retry & Clear All wiring
+        self.download_table.retry_requested.connect(self._on_retry_requested)
+        self.download_table.clear_all_requested.connect(self._on_clear_all_requested)
+
         # Settings -> engine (live propagation)
         self.settings_panel.settings_changed.connect(self._apply_settings)
 
@@ -122,6 +141,20 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_all_finished(self) -> None:
         self.update_status("All downloads complete")
+
+    @Slot(list)
+    def _on_retry_requested(self, urls: list[str]) -> None:
+        """Re-queue URLs whose previous attempt failed/cancelled."""
+        if urls:
+            self.engine.retry_urls(urls)
+            self._update_status_count()
+
+    @Slot(list)
+    def _on_clear_all_requested(self, urls: list[str]) -> None:
+        """User cleared the table — cancel active workers and reset dedup."""
+        self.engine.cancel_all()
+        self.engine.clear_dedup(urls)
+        self._update_status_count()
 
     def _update_status_count(self) -> None:
         done = self.download_table.get_completed_count()

@@ -24,7 +24,7 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=curl_cffi_bins,
-    datas=curl_cffi_datas + certifi_datas,
+    datas=curl_cffi_datas + certifi_datas + [('assets/icon.ico', 'assets'), ('assets/icon.png', 'assets')],
     hiddenimports=[
         *yt_dlp_imports,
         'PySide6.QtCore',
@@ -56,7 +56,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,  # GUI — no terminal window
-    # icon='assets/icon.ico',  # uncomment after creating icon (Phase 5)
+    icon='assets/icon.ico',
 )
 
 # ---------------------------------------------------------------------------

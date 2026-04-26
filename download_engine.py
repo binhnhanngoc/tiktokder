@@ -168,6 +168,32 @@ class DownloadEngine(QObject):
             worker.cancel()
         self.queue_updated.emit(0)
 
+    def retry_url(self, url: str) -> None:
+        """Re-queue a URL that previously finished (failed/cancelled).
+
+        Removes URL from the dedup set so add_urls doesn't filter it out.
+        Active downloads are left alone (caller should ensure URL is not active).
+        """
+        self._queued_urls.discard(url)
+        self.add_urls([url])
+
+    def retry_urls(self, urls: list[str]) -> None:
+        """Bulk re-queue previously finished URLs."""
+        for url in urls:
+            self._queued_urls.discard(url)
+        self.add_urls(urls)
+
+    def clear_dedup(self, urls: list[str] | None = None) -> None:
+        """Drop URLs from dedup tracking so they can be re-queued.
+
+        Pass None to clear the entire dedup set (used when 'Clear All' wipes the table).
+        """
+        if urls is None:
+            self._queued_urls.clear()
+        else:
+            for url in urls:
+                self._queued_urls.discard(url)
+
     @property
     def active_count(self) -> int:
         return len(self._active)

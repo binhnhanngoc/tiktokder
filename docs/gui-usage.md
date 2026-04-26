@@ -70,11 +70,26 @@ All settings persist to `~/.tiktokder/config.json` and sync between GUI and CLI.
 
 The Download Table shows real-time progress:
 - Video ID and title
-- Download status: "Pending", "Downloading", "Complete", "Failed"
+- Download status: "Queued", "Downloading", "Complete", "Failed", "Skipped", "Cancelled"
 - Progress percentage
 - File size
 
 Click the table row to view detailed information in the status bar.
+
+### Download Toolbar
+
+The toolbar above the table provides queue management:
+
+- **Clear Completed** — Remove only Complete/Skipped rows from the table.
+- **Clear All** — Remove every row (asks for confirmation). Cancels active
+  downloads and resets dedup tracking, so the same URLs can be re-added later.
+- **Retry Failed** — Re-queue every Failed/Cancelled row in one click.
+- **Cancel All** — Stop active downloads and clear pending queue.
+
+### Retrying a single video
+
+Right-click any row → **Retry** (only shown for Failed rows). The URL is
+re-queued on the engine immediately and starts as soon as a worker is free.
 
 ## Error Handling
 

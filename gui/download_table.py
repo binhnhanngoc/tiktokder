@@ -1,6 +1,6 @@
 """Download queue table with per-row progress bars and status indicators."""
 
-from PySide6.QtCore import Slot, Qt
+from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QMenu,
     QApplication,
+    QMessageBox,
 )
 
 from downloader import DownloadResult
@@ -39,6 +40,14 @@ STATUS_COLORS = {
 class DownloadTableWidget(QWidget):
     """Table showing download queue with progress bars and context menu."""
 
+    # Emitted when the user requests a retry for one or more URLs.
+    # Parent (MainWindow) connects this to DownloadEngine.retry_urls.
+    retry_requested = Signal(list)
+
+    # Emitted when 'Clear All' is invoked. Parent should cancel any active
+    # downloads and drop dedup tracking on the engine so URLs can be re-added.
+    clear_all_requested = Signal(list)  # list of URLs being cleared
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._url_to_row: dict[str, int] = {}
@@ -52,6 +61,14 @@ class DownloadTableWidget(QWidget):
         self.clear_btn = QPushButton("Clear Completed")
         self.clear_btn.clicked.connect(self._clear_completed)
         toolbar.addWidget(self.clear_btn)
+
+        self.clear_all_btn = QPushButton("Clear All")
+        self.clear_all_btn.clicked.connect(self._clear_all)
+        toolbar.addWidget(self.clear_all_btn)
+
+        self.retry_failed_btn = QPushButton("Retry Failed")
+        self.retry_failed_btn.clicked.connect(self._retry_all_failed)
+        toolbar.addWidget(self.retry_failed_btn)
 
         self.cancel_all_btn = QPushButton("Cancel All")
         toolbar.addWidget(self.cancel_all_btn)
@@ -175,14 +192,56 @@ class DownloadTableWidget(QWidget):
             clipboard.setText(url)
 
     def _retry_url(self, url: str) -> None:
-        """Re-add a failed URL. Parent should connect this to engine."""
-        # Remove old row, re-add
+        """Reset a failed/cancelled row to Queued and emit retry_requested."""
         row = self._url_to_row.get(url)
-        if row is not None:
-            self._set_status(row, STATUS_QUEUED)
-            bar = self.table.cellWidget(row, 2)
-            if bar:
-                bar.setValue(0)
+        if row is None:
+            return
+        self._set_status(row, STATUS_QUEUED)
+        bar = self.table.cellWidget(row, 2)
+        if bar:
+            bar.setValue(0)
+        self.retry_requested.emit([url])
+
+    def _retry_all_failed(self) -> None:
+        """Bulk retry every Failed/Cancelled row in the table."""
+        urls: list[str] = []
+        for row, data in self._row_data.items():
+            if data.get("status") in (STATUS_FAILED, STATUS_CANCELLED):
+                url = data.get("url")
+                if not url:
+                    continue
+                urls.append(url)
+                self._set_status(row, STATUS_QUEUED)
+                bar = self.table.cellWidget(row, 2)
+                if bar:
+                    bar.setValue(0)
+        if urls:
+            self.retry_requested.emit(urls)
+
+    def _clear_all(self) -> None:
+        """Confirm, then clear every row from the table.
+
+        Emits clear_all_requested with all URLs so the engine can cancel
+        in-flight workers and drop dedup tracking.
+        """
+        if self.table.rowCount() == 0:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Clear All",
+            "Remove all downloads from the list?\n"
+            "Active downloads will be cancelled.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        urls = [d.get("url") for d in self._row_data.values() if d.get("url")]
+        self.table.setRowCount(0)
+        self._url_to_row.clear()
+        self._row_data.clear()
+        self.clear_all_requested.emit(urls)
 
     def _clear_completed(self) -> None:
         """Remove completed and skipped rows from table."""

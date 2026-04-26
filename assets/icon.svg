@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#25F4EE"/>
+      <stop offset="55%" stop-color="#1877F2"/>
+      <stop offset="100%" stop-color="#FE2C55"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="8" y="8" width="240" height="240" rx="48" ry="48" fill="url(#bg)"/>
+
+  <!-- Inner panel for contrast -->
+  <rect x="32" y="32" width="192" height="192" rx="36" ry="36" fill="#0E1116" opacity="0.92"/>
+
+  <!-- Download arrow (white) -->
+  <g filter="url(#shadow)">
+    <rect x="112" y="60" width="32" height="80" rx="8" fill="#FFFFFF"/>
+    <polygon points="74,128 182,128 128,196" fill="#FFFFFF"/>
+  </g>
+
+  <!-- Tray under the arrow -->
+  <rect x="64" y="200" width="128" height="14" rx="6" fill="#FFFFFF"/>
+</svg>
