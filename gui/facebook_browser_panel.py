@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Slot
 from PySide6.QtWidgets import QPushButton, QSpinBox, QWidget
 
 from app_state import BrowserPanelState
@@ -47,6 +48,23 @@ class FacebookBrowserPanel(BaseBrowserPanel):
         # Slot in after Deselect All (index 2) so it sits with the table-side
         # controls rather than the right-aligned Download button.
         self._bottom_row.insertWidget(2, self.load_more_btn)
+
+        # Disable FB-only controls (scrolls budget + Load more) while a fetch
+        # is running. ``_on_fetch_done`` re-enables ``load_more_btn`` based on
+        # cumulative count, so we only need a re-enable hook for the spinbox.
+        self.fetch_started.connect(self._on_fetch_started_fb)
+        self.fetch_finished.connect(self._on_fetch_finished_fb)
+
+    @Slot()
+    def _on_fetch_started_fb(self) -> None:
+        self.scrolls_spin.setEnabled(False)
+        self.load_more_btn.setEnabled(False)
+
+    @Slot()
+    def _on_fetch_finished_fb(self) -> None:
+        self.scrolls_spin.setEnabled(True)
+        # ``load_more_btn`` is already re-enabled by ``_on_fetch_done`` based
+        # on whether any videos were collected — leave it alone here.
 
     def _create_fetcher(self, url: str):
         if not PLAYWRIGHT_AVAILABLE:

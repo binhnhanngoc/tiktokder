@@ -264,3 +264,165 @@ def test_fetch_completed_signal_ignores_unsaved_url(qapp, tmp_path: Path) -> Non
 
     ch = store.find_by_url("tiktok", "https://www.tiktok.com/@saved")
     assert ch.cached_videos == []
+
+
+# ── Fetch lifecycle (rapid-switch hang prevention) ────────────────────────
+
+class _StubFetcher:
+    """Bare-minimum stand-in for a QThread fetcher.
+
+    BaseBrowserPanel only touches: ``video_found``, ``error``, ``finished_fetch``
+    (signal-like), ``start()``, ``isRunning()``, ``cancel()``. We provide a
+    callable-list shim instead of a real QThread so the test stays synchronous
+    and free of Qt event-loop timing.
+    """
+
+    class _Sig:
+        def __init__(self) -> None:
+            self._slots: list = []
+
+        def connect(self, slot) -> None:
+            self._slots.append(slot)
+
+        def emit(self, *args) -> None:
+            for slot in self._slots:
+                slot(*args)
+
+    def __init__(self) -> None:
+        self.video_found = self._Sig()
+        self.error = self._Sig()
+        self.finished_fetch = self._Sig()
+        self.started = False
+        self.cancelled = False
+        self._running = False
+
+    def start(self) -> None:
+        self.started = True
+        self._running = True
+
+    def isRunning(self) -> bool:
+        return self._running
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+    def simulate_finish(self, count: int = 0) -> None:
+        self._running = False
+        self.finished_fetch.emit(count)
+
+
+def test_fetch_lifecycle_disables_saved_channels_controls(qapp, tmp_path: Path) -> None:
+    """Saved-channels table + buttons disable while browser fetch runs, re-enable on finish."""
+    from gui.tiktok_browser_panel import TikTokBrowserPanel
+    from gui.saved_channels_panel import SavedChannelsPanel
+
+    store = SavedChannelsStore()
+    add_channel(store, "tiktok", SavedChannel(url="https://www.tiktok.com/@a"))
+
+    browser = TikTokBrowserPanel()
+    panel = SavedChannelsPanel(
+        platform="tiktok",
+        browser_panel=browser,
+        store=store,
+        store_path=tmp_path / "saved.json",
+    )
+
+    # Idle: controls enabled.
+    assert panel.table.isEnabled()
+    assert panel.add_btn.isEnabled()
+    assert panel.refresh_btn.isEnabled()
+
+    # Drive a fetch via the stub.
+    fetcher = _StubFetcher()
+    browser._start_fetcher(fetcher)
+
+    # Fetching: controls disabled, busy bar visible.
+    # Use ``isHidden()`` (inverse of setVisible) — in offscreen mode parents
+    # aren't shown, so ``isVisible()`` returns False even for setVisible(True).
+    assert not panel.table.isEnabled()
+    assert not panel.add_btn.isEnabled()
+    assert not panel.refresh_btn.isEnabled()
+    assert not browser.progress_bar.isHidden()
+    assert not browser.cancel_btn.isHidden()
+    assert not browser.url_input.isEnabled()
+    assert not browser.browse_btn.isEnabled()
+
+    # Finish: everything restored.
+    fetcher.simulate_finish(0)
+    assert panel.table.isEnabled()
+    assert panel.add_btn.isEnabled()
+    assert panel.refresh_btn.isEnabled()
+    assert browser.progress_bar.isHidden()
+    assert browser.cancel_btn.isHidden()
+    assert browser.url_input.isEnabled()
+    assert browser.browse_btn.isEnabled()
+
+
+def test_browse_re_entry_during_fetch_is_ignored(qapp) -> None:
+    """Programmatic _on_browse() while fetching must NOT spawn a second fetcher
+    — that's the rapid-switch hang scenario."""
+    from gui.tiktok_browser_panel import TikTokBrowserPanel
+
+    browser = TikTokBrowserPanel()
+    fetcher = _StubFetcher()
+    browser.url_input.setText("https://www.tiktok.com/@a")
+    browser._start_fetcher(fetcher)
+    first_fetcher = browser._fetcher
+
+    # Simulate the rapid double-click path: SavedChannelsPanel._refresh_channel
+    # would call browser._on_browse() directly. The re-entry guard must hold.
+    browser._on_browse()
+    assert browser._fetcher is first_fetcher
+    assert fetcher.cancelled is False  # original fetch untouched
+
+    fetcher.simulate_finish(0)
+    assert browser._is_fetching is False
+
+
+def test_cancel_does_not_block_main_thread(qapp) -> None:
+    """Cancel sets the fetcher flag and updates UI immediately — no wait()."""
+    from gui.tiktok_browser_panel import TikTokBrowserPanel
+
+    browser = TikTokBrowserPanel()
+    fetcher = _StubFetcher()
+    browser.url_input.setText("https://www.tiktok.com/@a")
+    browser._start_fetcher(fetcher)
+
+    browser._on_cancel_clicked()
+
+    assert fetcher.cancelled is True
+    assert not browser.cancel_btn.isEnabled()
+    assert browser.status_label.text() == "Cancelling…"
+    # Old fetcher still "running" until the worker exits — but UI must not block.
+    assert browser._is_fetching is True
+
+    # Worker eventually drains and emits finished_fetch.
+    fetcher.simulate_finish(0)
+    assert browser._is_fetching is False
+    assert browser.progress_bar.isHidden()
+
+
+def test_context_menu_suppressed_during_fetch(qapp, tmp_path: Path) -> None:
+    """Right-click on the saved-channels table is a no-op while fetching —
+    prevents stacking a second QThread via Refresh / Download-all-new."""
+    from PySide6.QtCore import QPoint
+    from gui.tiktok_browser_panel import TikTokBrowserPanel
+    from gui.saved_channels_panel import SavedChannelsPanel
+
+    store = SavedChannelsStore()
+    add_channel(store, "tiktok", SavedChannel(url="https://www.tiktok.com/@a"))
+    browser = TikTokBrowserPanel()
+    panel = SavedChannelsPanel(
+        platform="tiktok",
+        browser_panel=browser,
+        store=store,
+        store_path=tmp_path / "saved.json",
+    )
+
+    # Force fetching state.
+    browser._is_fetching = True
+
+    # _on_context_menu must early-return without raising — easiest way to
+    # observe the no-op is that no QMenu.exec is invoked (the method returns
+    # cleanly even with a row hit).
+    panel._on_context_menu(QPoint(0, 0))  # no exception, no menu shown

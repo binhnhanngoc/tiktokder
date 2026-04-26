@@ -137,7 +137,29 @@ class SavedChannelsPanel(QWidget):
         # matching saved channel so the next click can show them instantly.
         self.browser_panel.fetch_completed.connect(self._on_browser_fetch_completed)
 
+        # Lifecycle wiring — disable rapid-click triggers while the browser
+        # panel is fetching. Prevents the "switch profile too fast" hang where
+        # double-click or context-menu refresh would stack QThreads.
+        self.browser_panel.fetch_started.connect(self._on_browser_fetch_started)
+        self.browser_panel.fetch_finished.connect(self._on_browser_fetch_finished)
+
         self.refresh_table()
+
+    # ── fetch lifecycle ───────────────────────────────────────────────────
+
+    @Slot()
+    def _on_browser_fetch_started(self) -> None:
+        """Disable saved-channels controls while a browser fetch is running."""
+        self.table.setEnabled(False)
+        self.add_btn.setEnabled(False)
+        self.refresh_btn.setEnabled(False)
+
+    @Slot()
+    def _on_browser_fetch_finished(self) -> None:
+        """Re-enable saved-channels controls after fetch completes/cancels."""
+        self.table.setEnabled(True)
+        self.add_btn.setEnabled(True)
+        self.refresh_btn.setEnabled(True)
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -297,6 +319,11 @@ class SavedChannelsPanel(QWidget):
     # ── context menu ──────────────────────────────────────────────────────
 
     def _on_context_menu(self, pos) -> None:
+        # Suppress the menu entirely while a browser fetch is running so the
+        # user can't trigger Refresh/Download-all-new and stack a second
+        # fetcher on top of the in-flight one.
+        if getattr(self.browser_panel, "_is_fetching", False):
+            return
         row = self.table.rowAt(pos.y())
         if row < 0:
             return

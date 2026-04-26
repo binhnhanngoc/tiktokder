@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QProgressBar,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -40,10 +41,18 @@ class BaseBrowserPanel(QWidget):
     # the result (used by SavedChannelsPanel to refresh the per-channel cache).
     fetch_completed = Signal(int)
 
+    # Lifecycle signals — fired regardless of success/cancel/error so siblings
+    # (saved-channels list, etc.) can disable rapid-click triggers without
+    # peeking at internal fetcher state. fetch_finished always pairs with
+    # fetch_started, even on cancel/error.
+    fetch_started = Signal()
+    fetch_finished = Signal()
+
     def __init__(self, placeholder: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._fetcher = None
         self._videos: list[VideoInfo] = []
+        self._is_fetching = False
 
         layout = QVBoxLayout(self)
 
@@ -57,7 +66,23 @@ class BaseBrowserPanel(QWidget):
         self.browse_btn.setIcon(icon("mdi6.magnify"))
         self.browse_btn.clicked.connect(self._on_browse)
         self._top_row.addWidget(self.browse_btn)
+
+        # Cancel button — only visible while a fetch is running. Click sets
+        # the fetcher's cancel flag without blocking the GUI thread.
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setIcon(icon("mdi6.close"))
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.clicked.connect(self._on_cancel_clicked)
+        self._top_row.addWidget(self.cancel_btn)
         layout.addLayout(self._top_row)
+
+        # Indeterminate "busy" bar — yt-dlp/Playwright don't report a total
+        # so we use the marquee mode (range 0–0). Hidden when idle.
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
 
         self.status_label = QLabel("")
         layout.addWidget(self.status_label)
@@ -108,9 +133,12 @@ class BaseBrowserPanel(QWidget):
         if not url:
             return
 
-        if self._fetcher is not None and self._fetcher.isRunning():
-            self._fetcher.cancel()
-            self._fetcher.wait()
+        # Re-entry guard. While a fetch is in flight, the surrounding controls
+        # (URL input, browse button, saved-channels table) are disabled — but
+        # programmatic callers (e.g. SavedChannelsPanel._refresh_channel) bypass
+        # those, so we still need this short-circuit to avoid overlap.
+        if self._is_fetching:
+            return
 
         fetcher = self._create_fetcher(url)
         if fetcher is None:
@@ -126,13 +154,19 @@ class BaseBrowserPanel(QWidget):
         Subclasses use this to launch additional fetchers (e.g. "Load more")
         that append rows instead of replacing them.
         """
+        self._is_fetching = True
         self.browse_btn.setEnabled(False)
+        self.url_input.setEnabled(False)
+        self.cancel_btn.setVisible(True)
+        self.cancel_btn.setEnabled(True)
+        self.progress_bar.setVisible(True)
         self.status_label.setText(self._start_status_text())
         self._fetcher = fetcher
         fetcher.video_found.connect(self._on_video_found)
         fetcher.error.connect(self._on_error)
         fetcher.finished_fetch.connect(self._on_fetch_done)
         fetcher.start()
+        self.fetch_started.emit()
 
     @Slot(object)
     def _on_video_found(self, video: VideoInfo) -> None:
@@ -161,9 +195,28 @@ class BaseBrowserPanel(QWidget):
 
     @Slot(int)
     def _on_fetch_done(self, total: int) -> None:
+        self._is_fetching = False
         self.browse_btn.setEnabled(True)
+        self.url_input.setEnabled(True)
+        self.cancel_btn.setVisible(False)
+        self.progress_bar.setVisible(False)
         self.status_label.setText(f"Found {total} videos")
         self.fetch_completed.emit(total)
+        self.fetch_finished.emit()
+
+    @Slot()
+    def _on_cancel_clicked(self) -> None:
+        """Request cancellation without blocking the GUI thread.
+
+        The fetcher's ``_cancelled`` flag exits ``run()`` between iterations.
+        We never call ``wait()`` — the worker emits ``finished_fetch`` when it
+        exits naturally, which routes through ``_on_fetch_done`` to restore UI.
+        """
+        if self._fetcher is None or not self._fetcher.isRunning():
+            return
+        self._fetcher.cancel()
+        self.cancel_btn.setEnabled(False)
+        self.status_label.setText("Cancelling…")
 
     def _select_all(self) -> None:
         self._set_all_checks(True)
