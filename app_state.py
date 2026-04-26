@@ -62,6 +62,8 @@ class AppState:
     download_queue: list[QueueItemState] = field(default_factory=list)
     tiktok_browser: BrowserPanelState = field(default_factory=BrowserPanelState)
     facebook_browser: BrowserPanelState = field(default_factory=BrowserPanelState)
+    library_active_uploader_tiktok: str | None = None
+    library_active_uploader_facebook: str | None = None
 
 
 _QUEUE_FIELDS = {f.name for f in fields(QueueItemState)}
@@ -73,6 +75,15 @@ def _coerce_int(value, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _coerce_optional_str(value) -> str | None:
+    """Tolerant string coercion — None passes through; empty string → None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value or None
+    return None
 
 
 def _load_queue_item(d: dict) -> QueueItemState | None:
@@ -151,6 +162,12 @@ def load_state(path: Path) -> AppState:
         download_queue=queue,
         tiktok_browser=_load_panel(data.get("tiktok_browser")),
         facebook_browser=_load_panel(data.get("facebook_browser")),
+        library_active_uploader_tiktok=_coerce_optional_str(
+            data.get("library_active_uploader_tiktok")
+        ),
+        library_active_uploader_facebook=_coerce_optional_str(
+            data.get("library_active_uploader_facebook")
+        ),
     )
 
 

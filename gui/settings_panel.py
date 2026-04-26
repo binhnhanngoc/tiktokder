@@ -1,4 +1,8 @@
-"""Settings panel for configuring output directory, workers, delay, and cookies."""
+"""Settings panel — Global / TikTok / Facebook sections in QGroupBoxes.
+
+Auto-saves on every field change. `settings_changed` is emitted after each
+save so MainWindow can live-propagate to the engine and browser panels.
+"""
 
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import (
@@ -8,10 +12,12 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLineEdit,
     QPushButton,
     QSpinBox,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -31,18 +37,44 @@ QUALITY_LABELS = (
 
 
 class SettingsPanel(QWidget):
-    """Settings form that auto-saves on change."""
+    """Settings form split into three QGroupBox sections, auto-saves on change."""
 
-    # Emitted when settings change so engine can update live
     settings_changed = Signal()
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.config = config
 
-        layout = QFormLayout(self)
+        outer = QVBoxLayout(self)
 
-        # Appearance — System / Light / Dark segmented control
+        outer.addWidget(self._build_global_group(config))
+        outer.addWidget(self._build_tiktok_group(config))
+        outer.addWidget(self._build_facebook_group(config))
+        outer.addStretch()
+
+        # Reset button below the groups.
+        self.reset_btn = QPushButton("Reset to Defaults")
+        self.reset_btn.clicked.connect(self._reset_defaults)
+        outer.addWidget(self.reset_btn)
+
+        # Auto-save wiring — common field set.
+        self.output_dir_input.textChanged.connect(self._save)
+        self.workers_spin.valueChanged.connect(self._save)
+        self.delay_spin.valueChanged.connect(self._save)
+        self.cookie_combo.currentTextChanged.connect(self._save)
+        self.cookies_file_input.textChanged.connect(self._save)
+        self.fb_scrolls_default_spin.valueChanged.connect(self._save)
+        self.quality_combo.currentIndexChanged.connect(self._save)
+        self.subs_check.stateChanged.connect(self._save)
+        self.thumb_check.stateChanged.connect(self._save)
+
+    # ── group builders ────────────────────────────────────────────────────
+
+    def _build_global_group(self, config: AppConfig) -> QGroupBox:
+        group = QGroupBox("Global")
+        form = QFormLayout(group)
+
+        # Appearance — segmented control.
         appearance_row = QHBoxLayout()
         self.theme_group = QButtonGroup(self)
         self.theme_group.setExclusive(True)
@@ -54,37 +86,58 @@ class SettingsPanel(QWidget):
             self.theme_group.addButton(btn)
             appearance_row.addWidget(btn)
         appearance_row.addStretch()
-        # Pre-check current mode without firing _on_theme_toggled.
         active = config.theme_mode if config.theme_mode in self._theme_buttons else "system"
         self._theme_buttons[active].blockSignals(True)
         self._theme_buttons[active].setChecked(True)
         self._theme_buttons[active].blockSignals(False)
         self.theme_group.buttonToggled.connect(self._on_theme_toggled)
-        layout.addRow("Appearance:", appearance_row)
+        form.addRow("Appearance:", appearance_row)
 
-        # Output directory
+        # Output dir.
         dir_row = QHBoxLayout()
         self.output_dir_input = QLineEdit(config.output_dir)
         dir_row.addWidget(self.output_dir_input, stretch=1)
         self.browse_btn = QPushButton("Browse...")
         self.browse_btn.clicked.connect(self._browse_output_dir)
         dir_row.addWidget(self.browse_btn)
-        layout.addRow("Output Directory:", dir_row)
+        form.addRow("Output Directory:", dir_row)
 
-        # Workers
+        # Workers.
         self.workers_spin = QSpinBox()
         self.workers_spin.setRange(1, 10)
         self.workers_spin.setValue(config.workers)
-        layout.addRow("Concurrent Downloads:", self.workers_spin)
+        form.addRow("Concurrent Downloads:", self.workers_spin)
 
-        # Delay
+        # Delay.
         self.delay_spin = QDoubleSpinBox()
         self.delay_spin.setRange(0.0, 10.0)
         self.delay_spin.setSingleStep(0.5)
         self.delay_spin.setValue(config.delay)
-        layout.addRow("Delay Between Downloads (s):", self.delay_spin)
+        form.addRow("Delay Between Downloads (s):", self.delay_spin)
 
-        # Cookie browser
+        # Default quality.
+        self.quality_combo = QComboBox()
+        for label, value in QUALITY_LABELS:
+            self.quality_combo.addItem(label, value)
+        self._select_quality(config.quality_default)
+        self.quality_combo.setToolTip("Audio-only and merged-stream presets require ffmpeg on PATH.")
+        form.addRow("Default Quality:", self.quality_combo)
+
+        # Subs / thumb.
+        self.subs_check = QCheckBox()
+        self.subs_check.setChecked(config.write_subtitles)
+        form.addRow("Write subtitles (en):", self.subs_check)
+
+        self.thumb_check = QCheckBox()
+        self.thumb_check.setChecked(config.write_thumbnail)
+        form.addRow("Write thumbnail:", self.thumb_check)
+
+        return group
+
+    def _build_tiktok_group(self, config: AppConfig) -> QGroupBox:
+        group = QGroupBox("TikTok")
+        form = QFormLayout(group)
+
         self.cookie_combo = QComboBox()
         self.cookie_combo.addItems(["None", "chrome", "firefox", "edge"])
         if config.cookie_browser:
@@ -92,10 +145,15 @@ class SettingsPanel(QWidget):
             if idx >= 0:
                 self.cookie_combo.setCurrentIndex(idx)
         self.cookie_combo.setToolTip("Used by yt-dlp for TikTok downloads.")
-        layout.addRow("Cookie Browser:", self.cookie_combo)
+        form.addRow("Cookie Browser:", self.cookie_combo)
 
-        # Facebook cookies file (Netscape cookies.txt) — bypasses the
-        # anonymous-only feed cap on FB profile reels/videos tabs.
+        return group
+
+    def _build_facebook_group(self, config: AppConfig) -> QGroupBox:
+        group = QGroupBox("Facebook")
+        form = QFormLayout(group)
+
+        # cookies.txt path.
         cookies_row = QHBoxLayout()
         self.cookies_file_input = QLineEdit(config.cookies_file or "")
         self.cookies_file_input.setPlaceholderText("Path to Netscape cookies.txt (optional)")
@@ -108,57 +166,34 @@ class SettingsPanel(QWidget):
         self.cookies_browse_btn = QPushButton("Browse...")
         self.cookies_browse_btn.clicked.connect(self._browse_cookies_file)
         cookies_row.addWidget(self.cookies_browse_btn)
-        layout.addRow("Facebook Cookies File:", cookies_row)
+        form.addRow("Cookies File:", cookies_row)
 
-        # Default quality
-        self.quality_combo = QComboBox()
-        for label, value in QUALITY_LABELS:
-            self.quality_combo.addItem(label, value)
-        self._select_quality(config.quality_default)
-        self.quality_combo.setToolTip("Audio-only and merged-stream presets require ffmpeg on PATH.")
-        layout.addRow("Default Quality:", self.quality_combo)
+        # Default max scrolls — propagated to FacebookBrowserPanel on init.
+        self.fb_scrolls_default_spin = QSpinBox()
+        self.fb_scrolls_default_spin.setRange(1, 50)
+        self.fb_scrolls_default_spin.setValue(config.facebook_max_scrolls_default)
+        self.fb_scrolls_default_spin.setToolTip(
+            "Default scroll iterations per fetch. Higher = more videos, slower."
+        )
+        form.addRow("Default Max Scrolls:", self.fb_scrolls_default_spin)
 
-        # Subtitles
-        self.subs_check = QCheckBox()
-        self.subs_check.setChecked(config.write_subtitles)
-        layout.addRow("Write subtitles (en):", self.subs_check)
+        return group
 
-        # Thumbnails
-        self.thumb_check = QCheckBox()
-        self.thumb_check.setChecked(config.write_thumbnail)
-        layout.addRow("Write thumbnail:", self.thumb_check)
-
-        # Reset button
-        self.reset_btn = QPushButton("Reset to Defaults")
-        self.reset_btn.clicked.connect(self._reset_defaults)
-        layout.addRow("", self.reset_btn)
-
-        # Auto-save on change
-        self.output_dir_input.textChanged.connect(self._save)
-        self.workers_spin.valueChanged.connect(self._save)
-        self.delay_spin.valueChanged.connect(self._save)
-        self.cookie_combo.currentTextChanged.connect(self._save)
-        self.cookies_file_input.textChanged.connect(self._save)
-        self.quality_combo.currentIndexChanged.connect(self._save)
-        self.subs_check.stateChanged.connect(self._save)
-        self.thumb_check.stateChanged.connect(self._save)
+    # ── helpers ───────────────────────────────────────────────────────────
 
     def _select_quality(self, value: str) -> None:
-        """Move combo selection to the entry whose userData matches ``value``."""
         for i in range(self.quality_combo.count()):
             if self.quality_combo.itemData(i) == value:
                 self.quality_combo.setCurrentIndex(i)
                 return
-        self.quality_combo.setCurrentIndex(0)  # default to "Best"
+        self.quality_combo.setCurrentIndex(0)
 
     def _browse_output_dir(self) -> None:
-        """Open native directory picker."""
         path = QFileDialog.getExistingDirectory(self, "Select Output Directory", self.config.output_dir)
         if path:
             self.output_dir_input.setText(path)
 
     def _browse_cookies_file(self) -> None:
-        """Open native file picker for the Netscape cookies.txt."""
         start = self.cookies_file_input.text() or self.config.output_dir
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -171,7 +206,6 @@ class SettingsPanel(QWidget):
 
     @Slot()
     def _save(self) -> None:
-        """Persist current settings to config file."""
         self.config.output_dir = self.output_dir_input.text()
         self.config.workers = self.workers_spin.value()
         self.config.delay = self.delay_spin.value()
@@ -179,6 +213,7 @@ class SettingsPanel(QWidget):
         self.config.cookie_browser = cookie if cookie != "None" else None
         cookies_file = self.cookies_file_input.text().strip()
         self.config.cookies_file = cookies_file or None
+        self.config.facebook_max_scrolls_default = self.fb_scrolls_default_spin.value()
         self.config.quality_default = self.quality_combo.currentData() or "best"
         self.config.write_subtitles = self.subs_check.isChecked()
         self.config.write_thumbnail = self.thumb_check.isChecked()
@@ -186,17 +221,16 @@ class SettingsPanel(QWidget):
         self.settings_changed.emit()
 
     def _reset_defaults(self) -> None:
-        """Reset all settings to defaults."""
         defaults = AppConfig()
         self.output_dir_input.setText(defaults.output_dir)
         self.workers_spin.setValue(defaults.workers)
         self.delay_spin.setValue(defaults.delay)
         self.cookie_combo.setCurrentIndex(0)
         self.cookies_file_input.clear()
+        self.fb_scrolls_default_spin.setValue(defaults.facebook_max_scrolls_default)
         self._select_quality(defaults.quality_default)
         self.subs_check.setChecked(defaults.write_subtitles)
         self.thumb_check.setChecked(defaults.write_thumbnail)
-        # Re-arm Appearance to System without echoing twice through _save.
         sys_btn = self._theme_buttons["system"]
         sys_btn.blockSignals(True)
         sys_btn.setChecked(True)
@@ -207,7 +241,6 @@ class SettingsPanel(QWidget):
 
     @Slot(object, bool)
     def _on_theme_toggled(self, button, checked: bool) -> None:
-        """Handle Appearance segmented-control toggle."""
         if not checked:
             return
         for value, btn in self._theme_buttons.items():

@@ -16,6 +16,7 @@ class FacebookBrowserPanel(BaseBrowserPanel):
     def __init__(
         self,
         cookies_file: str | None = None,
+        default_scrolls: int = 10,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(
@@ -30,7 +31,7 @@ class FacebookBrowserPanel(BaseBrowserPanel):
         # videos slowly and the right value depends on profile size.
         self.scrolls_spin = QSpinBox()
         self.scrolls_spin.setRange(1, 50)
-        self.scrolls_spin.setValue(10)
+        self.scrolls_spin.setValue(default_scrolls)
         self.scrolls_spin.setPrefix("Scrolls: ")
         self.scrolls_spin.setToolTip("Max scroll iterations per fetch (higher = more videos, slower)")
         # Insert just before the Browse button (last item in the top row).

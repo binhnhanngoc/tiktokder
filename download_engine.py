@@ -191,6 +191,12 @@ class DownloadEngine(QObject):
             worker.wait()
             worker.deleteLater()  # Prevent memory leak
         self._completed_count += 1
+        # Stamp file_path from yt-dlp info so the GUI can offer
+        # "Open in Explorer" without re-reading history.
+        if result.success and not result.file_path and info:
+            files = info.get("requested_downloads") or []
+            first = files[0] if files else {}
+            result.file_path = first.get("filepath") or info.get("filename")
         # Save to history on successful download (rich record + dedup-id set).
         if result.success and result.video_id:
             self._history.add(result.video_id)

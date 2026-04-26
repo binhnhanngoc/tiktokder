@@ -50,6 +50,7 @@ CONFIG_DIR = _default_config_dir()
 CONFIG_PATH = CONFIG_DIR / "config.json"
 HISTORY_PATH = CONFIG_DIR / "history.json"
 STATE_PATH = CONFIG_DIR / "state.json"
+SAVED_CHANNELS_PATH = CONFIG_DIR / "saved_channels.json"
 
 
 def _migrate_legacy_data_dir() -> None:
@@ -98,6 +99,7 @@ class AppConfig:
     write_thumbnail: bool = False
     history_max_entries: int = DEFAULT_MAX_ENTRIES
     theme_mode: str = "system"           # one of system|light|dark
+    facebook_max_scrolls_default: int = 10
 
 
 @dataclass(frozen=True)
@@ -220,6 +222,7 @@ __all__ = [
     "CONFIG_PATH",
     "HISTORY_PATH",
     "STATE_PATH",
+    "SAVED_CHANNELS_PATH",
     "get_platform_defaults",
     "get_max_retry_attempts",
     "load_config",

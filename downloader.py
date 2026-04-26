@@ -174,6 +174,7 @@ class DownloadResult:
     title: str | None = None
     error: str | None = None
     skipped: bool = False
+    file_path: str | None = None
 
 
 # Quality preset → yt-dlp `format` expression. yt-dlp falls back to best
