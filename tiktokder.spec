@@ -17,6 +17,17 @@ yt_dlp_imports = collect_submodules('yt_dlp')
 # certifi CA bundle for HTTPS verification
 certifi_datas = collect_data_files('certifi')
 
+# qtawesome ships icon fonts (TTFs) + JSON charmaps as package data
+qtawesome_datas = collect_data_files('qtawesome')
+qtawesome_imports = collect_submodules('qtawesome')
+
+# qdarktheme ships SVG resources + stylesheet templates as package data
+qdarktheme_datas = collect_data_files('qdarktheme')
+qdarktheme_imports = collect_submodules('qdarktheme')
+
+# darkdetect picks platform backend dynamically
+darkdetect_imports = collect_submodules('darkdetect')
+
 # ---------------------------------------------------------------------------
 # GUI entry point (app.py) — no console window
 # ---------------------------------------------------------------------------
@@ -24,12 +35,22 @@ a = Analysis(
     ['app.py'],
     pathex=[],
     binaries=curl_cffi_bins,
-    datas=curl_cffi_datas + certifi_datas + [('assets/icon.ico', 'assets'), ('assets/icon.png', 'assets')],
+    datas=(
+        curl_cffi_datas
+        + certifi_datas
+        + qtawesome_datas
+        + qdarktheme_datas
+        + [('assets/icon.ico', 'assets'), ('assets/icon.png', 'assets')]
+    ),
     hiddenimports=[
         *yt_dlp_imports,
+        *qtawesome_imports,
+        *qdarktheme_imports,
+        *darkdetect_imports,
         'PySide6.QtCore',
         'PySide6.QtGui',
         'PySide6.QtWidgets',
+        'PySide6.QtSvg',
         'curl_cffi',
         'curl_cffi.requests',
     ],
