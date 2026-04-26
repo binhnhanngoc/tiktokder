@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
             max_workers=config.workers,
             delay=config.delay,
             cookie_browser=config.cookie_browser,
+            cookies_file=config.cookies_file,
             quality=config.quality_default,
             write_subs=config.write_subtitles,
             write_thumb=config.write_thumbnail,
@@ -248,6 +249,7 @@ class MainWindow(QMainWindow):
         self.engine.max_workers = self.config.workers
         self.engine.delay = self.config.delay
         self.engine.cookie_browser = self.config.cookie_browser
+        self.engine.cookies_file = self.config.cookies_file
         self.engine.quality = self.config.quality_default
         self.engine.write_subs = self.config.write_subtitles
         self.engine.write_thumb = self.config.write_thumbnail

@@ -200,6 +200,7 @@ def get_ydl_opts(
     quality: str = "best",
     write_subs: bool = False,
     write_thumb: bool = False,
+    cookies_file: str | None = None,
 ) -> dict:
     """Return yt-dlp options dict.
 
@@ -208,6 +209,8 @@ def get_ydl_opts(
     exponential + jitter waits per failure layer (http/fragment/extractor).
     `quality`/`write_subs`/`write_thumb` plug directly into yt-dlp options;
     audio-only quality also wires the FFmpegExtractAudio postprocessor.
+    `cookies_file` is a Netscape cookies.txt path (FB auth); when set it
+    takes precedence over `cookie_browser` for the same call.
     """
     opts = {
         "outtmpl": os.path.join(output_dir, "%(id)s_%(title).50s.%(ext)s"),
@@ -228,7 +231,9 @@ def get_ydl_opts(
         "socket_timeout": 30,  # Fail fast on stalled connections
         "impersonate": ImpersonateTarget("chrome", "136"),  # Bypass TLS fingerprint detection
     }
-    if cookie_browser:
+    if cookies_file:
+        opts["cookiefile"] = cookies_file
+    elif cookie_browser:
         opts["cookiesfrombrowser"] = (cookie_browser,)
     if force_overwrite:
         # Force re-download even if the destination file already exists.
@@ -281,6 +286,7 @@ def _do_download(
     write_subs: bool = False,
     write_thumb: bool = False,
     base_dir: str | None = None,
+    cookies_file: str | None = None,
 ) -> dict:
     """Inner download path: invokes yt-dlp; raises typed exception on failure.
 
@@ -309,6 +315,7 @@ def _do_download(
         quality=quality,
         write_subs=write_subs,
         write_thumb=write_thumb,
+        cookies_file=cookies_file,
     )
     if progress_hook:
         opts["progress_hooks"] = [progress_hook]
@@ -352,6 +359,7 @@ def download_video(
     write_thumb: bool = False,
     base_dir: str | None = None,
     return_info: bool = False,
+    cookies_file: str | None = None,
 ) -> "DownloadResult | tuple[DownloadResult, dict | None]":
     """Download a single video.
 
@@ -384,6 +392,7 @@ def download_video(
             write_subs=write_subs,
             write_thumb=write_thumb,
             base_dir=base_dir,
+            cookies_file=cookies_file,
         )
 
     info: dict | None = None

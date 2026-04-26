@@ -28,6 +28,7 @@ class DownloadWorker(QThread):
         quality: str = "best",
         write_subs: bool = False,
         write_thumb: bool = False,
+        cookies_file: str | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -38,6 +39,7 @@ class DownloadWorker(QThread):
         self.quality = quality
         self.write_subs = write_subs
         self.write_thumb = write_thumb
+        self.cookies_file = cookies_file
         self._cancelled = False
         self._info: dict | None = None
 
@@ -54,13 +56,17 @@ class DownloadWorker(QThread):
                     self.progress.emit(self.url, pct)
 
         try:
-            # Skip cookies for Facebook — public reels don't need them,
-            # and yt-dlp can't copy Chrome/Edge cookie DB while browser is running
-            cookies = self.cookie_browser if detect_platform(self.url) != "facebook" else None
+            # FB reels need auth cookies for current extractor HTML; route the
+            # configured cookies.txt to yt-dlp on FB. Skip browser cookie DB
+            # for FB to avoid the locked-DB issue while Chrome/Edge is running.
+            is_fb = detect_platform(self.url) == "facebook"
+            cookies = None if is_fb else self.cookie_browser
+            cookies_file = self.cookies_file if is_fb else None
             result, info = download_video(
                 self.url, self.output_dir,
                 progress_hook=_progress_hook,
                 cookie_browser=cookies,
+                cookies_file=cookies_file,
                 force_overwrite=self.force_overwrite,
                 quality=self.quality,
                 write_subs=self.write_subs,
@@ -101,6 +107,7 @@ class DownloadEngine(QObject):
         write_subs: bool = False,
         write_thumb: bool = False,
         history_max_entries: int | None = None,
+        cookies_file: str | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -110,6 +117,7 @@ class DownloadEngine(QObject):
         self.delay_std = delay_std
         self.delay_floor = delay_floor
         self.cookie_browser = cookie_browser
+        self.cookies_file = cookies_file
         self.quality = quality
         self.write_subs = write_subs
         self.write_thumb = write_thumb
@@ -159,6 +167,7 @@ class DownloadEngine(QObject):
                 quality=self.quality,
                 write_subs=self.write_subs,
                 write_thumb=self.write_thumb,
+                cookies_file=self.cookies_file,
                 parent=self,
             )
             worker.progress.connect(self._on_progress)
