@@ -1,12 +1,18 @@
 """QThread-based download engine with Qt signals for GUI progress updates."""
 
 import random
+from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 
-from config import load_history, save_history, get_platform_defaults
-from downloader import download_video, DownloadResult
-from url_parser import extract_video_id, detect_platform
+from config import (
+    HistoryRecord,
+    add_history_record,
+    get_platform_defaults,
+    load_history,
+)
+from downloader import DownloadResult, download_video
+from url_parser import detect_platform, extract_video_id
 
 
 class DownloadWorker(QThread):
@@ -14,10 +20,14 @@ class DownloadWorker(QThread):
 
     progress = Signal(str, float)       # (url, percent 0-100)
     finished_download = Signal(str, object)  # (url, DownloadResult)
+    finished_with_info = Signal(str, object, object)  # (url, DownloadResult, info dict)
 
     def __init__(
         self, url: str, output_dir: str, cookie_browser: str | None = None,
         force_overwrite: bool = False,
+        quality: str = "best",
+        write_subs: bool = False,
+        write_thumb: bool = False,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -25,7 +35,11 @@ class DownloadWorker(QThread):
         self.output_dir = output_dir
         self.cookie_browser = cookie_browser
         self.force_overwrite = force_overwrite
+        self.quality = quality
+        self.write_subs = write_subs
+        self.write_thumb = write_thumb
         self._cancelled = False
+        self._info: dict | None = None
 
     def run(self) -> None:
         """Execute download in background thread."""
@@ -43,14 +57,21 @@ class DownloadWorker(QThread):
             # Skip cookies for Facebook — public reels don't need them,
             # and yt-dlp can't copy Chrome/Edge cookie DB while browser is running
             cookies = self.cookie_browser if detect_platform(self.url) != "facebook" else None
-            result = download_video(
+            result, info = download_video(
                 self.url, self.output_dir,
                 progress_hook=_progress_hook,
                 cookie_browser=cookies,
                 force_overwrite=self.force_overwrite,
+                quality=self.quality,
+                write_subs=self.write_subs,
+                write_thumb=self.write_thumb,
+                return_info=True,
             )
+            self._info = info
         except Exception as e:
             result = DownloadResult(url=self.url, success=False, error=str(e))
+            self._info = None
+        self.finished_with_info.emit(self.url, result, self._info)
         self.finished_download.emit(self.url, result)
 
     def cancel(self) -> None:
@@ -66,6 +87,7 @@ class DownloadEngine(QObject):
     download_finished = Signal(str, object) # url, DownloadResult
     all_finished = Signal()
     queue_updated = Signal(int)             # remaining count
+    history_changed = Signal()              # emitted after a HistoryRecord is persisted
 
     def __init__(
         self,
@@ -75,6 +97,10 @@ class DownloadEngine(QObject):
         cookie_browser: str | None = None,
         delay_std: float = 0.3,
         delay_floor: float = 0.2,
+        quality: str = "best",
+        write_subs: bool = False,
+        write_thumb: bool = False,
+        history_max_entries: int | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -84,6 +110,10 @@ class DownloadEngine(QObject):
         self.delay_std = delay_std
         self.delay_floor = delay_floor
         self.cookie_browser = cookie_browser
+        self.quality = quality
+        self.write_subs = write_subs
+        self.write_thumb = write_thumb
+        self.history_max_entries = history_max_entries
         self._queue: list[str] = []
         self._active: dict[str, DownloadWorker] = {}
         self._queued_urls: set[str] = set()  # Dedup: track all URLs ever added
@@ -125,7 +155,11 @@ class DownloadEngine(QObject):
             self._forced_urls.discard(url)
             worker = DownloadWorker(
                 url, self.output_dir, self.cookie_browser,
-                force_overwrite=force, parent=self,
+                force_overwrite=force,
+                quality=self.quality,
+                write_subs=self.write_subs,
+                write_thumb=self.write_thumb,
+                parent=self,
             )
             worker.progress.connect(self._on_progress)
             worker.finished_download.connect(self._on_worker_finished)
@@ -143,14 +177,21 @@ class DownloadEngine(QObject):
     def _on_worker_finished(self, url: str, result: DownloadResult) -> None:
         """Handle worker completion: clean up and schedule next."""
         worker = self._active.pop(url, None)
+        info: dict | None = worker._info if worker else None
         if worker:
             worker.wait()
             worker.deleteLater()  # Prevent memory leak
         self._completed_count += 1
-        # Save to history on successful download
+        # Save to history on successful download (rich record + dedup-id set).
         if result.success and result.video_id:
             self._history.add(result.video_id)
-            save_history(self._history)
+            record = self._build_record(url, result, info)
+            try:
+                add_history_record(record, max_entries=self.history_max_entries)
+                self.history_changed.emit()
+            except Exception:
+                # History persistence is best-effort — never fail the download.
+                pass
         self.download_finished.emit(url, result)
         self.queue_updated.emit(len(self._queue))
 
@@ -202,6 +243,40 @@ class DownloadEngine(QObject):
         for url in urls:
             self._queued_urls.discard(url)
         self.add_urls(urls, force=force)
+
+    def _build_record(
+        self,
+        url: str,
+        result: DownloadResult,
+        info: dict | None,
+    ) -> HistoryRecord:
+        """Compose a HistoryRecord from yt-dlp metadata + DownloadResult."""
+        info = info or {}
+        files = info.get("requested_downloads") or []
+        first = files[0] if files else {}
+        file_path = first.get("filepath") or info.get("filename")
+        height = first.get("height") or info.get("height")
+        if isinstance(height, int) and height > 0:
+            quality_str = f"{height}p"
+        else:
+            quality_str = self.quality
+        size = (
+            first.get("filesize")
+            or first.get("filesize_approx")
+            or info.get("filesize")
+            or info.get("filesize_approx")
+        )
+        return HistoryRecord(
+            video_id=result.video_id or str(info.get("id", "")),
+            platform=detect_platform(url),
+            uploader=info.get("uploader") or info.get("channel") or info.get("uploader_id"),
+            title=result.title or info.get("title"),
+            url=url,
+            quality=quality_str,
+            file_path=file_path,
+            size_bytes=size if isinstance(size, int) else None,
+            downloaded_at=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+        )
 
     def clear_dedup(self, urls: list[str] | None = None) -> None:
         """Drop URLs from dedup tracking so they can be re-queued.

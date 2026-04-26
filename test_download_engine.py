@@ -14,12 +14,14 @@ class TestDownloadWorker:
     def test_worker_emits_finished(self):
         """Test worker emits finished signal with result."""
         fake_result = DownloadResult(url="http://x.com/1", success=True, video_id="1", title="Test")
+        fake_info = {"id": "1", "title": "Test"}
         results = []
 
         worker = DownloadWorker("http://x.com/1", "./downloads")
         worker.finished_download.connect(lambda url, r: results.append((url, r)))
 
-        with patch("download_engine.download_video", return_value=fake_result):
+        # download_video now returns (result, info) when return_info=True.
+        with patch("download_engine.download_video", return_value=(fake_result, fake_info)):
             worker.run()  # Run directly for testing
 
         assert len(results) == 1
@@ -127,17 +129,17 @@ class TestDownloadEngine:
         assert engine.queue_count == 1
 
     def test_successful_download_saves_history(self):
-        """Test that successful download adds video_id to history."""
+        """Test that successful download adds video_id to history and persists a record."""
         engine = DownloadEngine(output_dir="./downloads")
         engine._history = set()
 
         result = DownloadResult(url="http://x.com/1", success=True, video_id="12345")
 
-        with patch("download_engine.save_history") as mock_save:
+        with patch("download_engine.add_history_record") as mock_add:
             engine._on_worker_finished("http://x.com/1", result)
 
         assert "12345" in engine._history
-        mock_save.assert_called_once()
+        mock_add.assert_called_once()
 
     def test_failed_download_does_not_save_history(self):
         """Test that failed download does not modify history."""
@@ -146,11 +148,56 @@ class TestDownloadEngine:
 
         result = DownloadResult(url="http://x.com/1", success=False, error="fail")
 
-        with patch("download_engine.save_history") as mock_save:
+        with patch("download_engine.add_history_record") as mock_add:
             engine._on_worker_finished("http://x.com/1", result)
 
         assert len(engine._history) == 0
-        mock_save.assert_not_called()
+        mock_add.assert_not_called()
+
+    def test_history_changed_signal_fires_on_success(self):
+        """Engine emits history_changed after persisting a record."""
+        engine = DownloadEngine(output_dir="./downloads")
+        engine._history = set()
+        emissions: list[bool] = []
+        engine.history_changed.connect(lambda: emissions.append(True))
+
+        result = DownloadResult(url="http://x.com/1", success=True, video_id="12345")
+        with patch("download_engine.add_history_record"):
+            engine._on_worker_finished("http://x.com/1", result)
+
+        assert emissions == [True]
+
+    def test_engine_uses_quality_from_init(self):
+        """Engine forwards quality kwarg to spawned workers."""
+        engine = DownloadEngine(output_dir="./downloads", quality="720p", write_subs=True)
+        assert engine.quality == "720p"
+        assert engine.write_subs is True
+        assert engine.write_thumb is False
+
+    def test_build_record_uses_info_metadata(self):
+        """_build_record extracts platform/uploader/title from yt-dlp info."""
+        engine = DownloadEngine(output_dir="./downloads", quality="best")
+        result = DownloadResult(
+            url="https://www.tiktok.com/@u/video/1",
+            success=True,
+            video_id="1",
+            title="hello",
+        )
+        info = {
+            "id": "1",
+            "title": "hello",
+            "uploader": "@u",
+            "height": 720,
+            "filesize_approx": 1024,
+            "requested_downloads": [{"filepath": "/tmp/1.mp4", "height": 720}],
+        }
+        rec = engine._build_record("https://www.tiktok.com/@u/video/1", result, info)
+        assert rec.video_id == "1"
+        assert rec.platform == "tiktok"
+        assert rec.uploader == "@u"
+        assert rec.quality == "720p"
+        assert rec.file_path == "/tmp/1.mp4"
+        assert rec.downloaded_at is not None
 
     def test_add_urls_dedups_repeats(self):
         """Re-adding the same URL while it's tracked should not double-queue."""
