@@ -55,7 +55,15 @@ def reveal_in_file_manager(path: str) -> bool:
         return False
     try:
         if sys.platform == "win32":
-            subprocess.Popen(["explorer", f"/select,{os.path.normpath(path)}"])
+            # Pass as a single command string (not list). subprocess.list2cmdline
+            # quotes any list arg containing a space, producing
+            # `explorer "/select,C:\path with space\file.mp4"` — but
+            # explorer.exe's parser expects only the PATH to be quoted, not the
+            # whole `/select,PATH` token. The quoted form silently falls back to
+            # the default folder. Build the command line manually so explorer
+            # sees `/select,"PATH"`.
+            normalized = os.path.normpath(os.path.abspath(path))
+            subprocess.Popen(f'explorer /select,"{normalized}"')
         elif sys.platform == "darwin":
             subprocess.Popen(["open", "-R", path])
         else:

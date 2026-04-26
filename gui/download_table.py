@@ -1,8 +1,6 @@
 """Download queue table with per-row progress bars and status indicators."""
 
 import os
-import subprocess
-import sys
 
 from PySide6.QtCore import Signal, Slot, Qt
 from PySide6.QtGui import QColor
@@ -22,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from app_state import QueueItemState
 from downloader import DownloadResult
+from gui._history_helpers import reveal_in_file_manager
 from gui.icons import icon
 from gui.tokens import token
 
@@ -33,26 +32,6 @@ STATUS_COMPLETE = "Complete"
 STATUS_FAILED = "Failed"
 STATUS_SKIPPED = "Skipped"
 STATUS_CANCELLED = "Cancelled"
-
-def _reveal_in_file_manager(path: str) -> bool:
-    """Open the OS file manager with ``path`` selected/highlighted.
-
-    Falls back to opening the containing folder where reveal isn't supported
-    (Linux). Returns False if the path is missing.
-    """
-    if not path or not os.path.exists(path):
-        return False
-    try:
-        if sys.platform == "win32":
-            # /select, takes a single arg — the file to highlight in Explorer.
-            subprocess.Popen(["explorer", f"/select,{os.path.normpath(path)}"])
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", "-R", path])
-        else:
-            subprocess.Popen(["xdg-open", os.path.dirname(path) or "."])
-        return True
-    except OSError:
-        return False
 
 
 # Map status → semantic token name. Resolved per-call so a live theme switch
@@ -220,7 +199,7 @@ class DownloadTableWidget(QWidget):
         # worker runs), so we don't offer it there.
         if status == STATUS_COMPLETE and filepath and os.path.exists(filepath):
             open_action = menu.addAction("Open in Explorer")
-            open_action.triggered.connect(lambda: _reveal_in_file_manager(filepath))
+            open_action.triggered.connect(lambda: reveal_in_file_manager(filepath))
 
         # Copy URL — always available.
         copy_action = menu.addAction("Copy URL")
