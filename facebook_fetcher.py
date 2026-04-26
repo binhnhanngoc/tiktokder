@@ -38,11 +38,15 @@ class FacebookFetcher(QThread):
         self,
         page_url: str,
         max_scrolls: int = 10,
+        seed_seen_urls: set[str] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.page_url = page_url
         self.max_scrolls = max_scrolls
+        # Pre-seeded dedup set lets "Load more" suppress already-shown videos
+        # so the loop only emits new ones once Facebook lazy-loads further.
+        self._seed_seen_urls = set(seed_seen_urls) if seed_seen_urls else set()
         self._cancelled = False
 
     def run(self) -> None:
@@ -56,7 +60,13 @@ class FacebookFetcher(QThread):
             return
 
         count = 0
-        seen_urls: set[str] = set()
+        # Seed with already-known URLs so "Load more" suppresses duplicates.
+        seen_urls: set[str] = set(self._seed_seen_urls)
+        # Allow a few empty iterations before giving up — Facebook's lazy
+        # loader is slow and the first scrolls after a "Load more" usually
+        # see only the cached cards before new ones get rendered.
+        empty_streak = 0
+        EMPTY_TOLERANCE = 3
 
         try:
             with sync_playwright() as p:
@@ -98,13 +108,17 @@ class FacebookFetcher(QThread):
                             self.video_found.emit(video)
                             count += 1
 
-                    # Scroll down for more content
-                    page.evaluate("window.scrollBy(0, window.innerHeight * 2)")
-                    page.wait_for_timeout(1500)
+                    # Scroll to absolute bottom — triggers FB's intersection
+                    # observer more reliably than a fixed-pixel scrollBy.
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(2500)
 
-                    # Stop if no new videos found after scroll
-                    if not new_found:
-                        break
+                    if new_found:
+                        empty_streak = 0
+                    else:
+                        empty_streak += 1
+                        if empty_streak >= EMPTY_TOLERANCE:
+                            break
 
                 browser.close()
 

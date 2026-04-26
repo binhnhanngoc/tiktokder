@@ -39,17 +39,17 @@ class BaseBrowserPanel(QWidget):
 
         layout = QVBoxLayout(self)
 
-        top = QHBoxLayout()
+        self._top_row = QHBoxLayout()
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText(placeholder)
         self.url_input.returnPressed.connect(self._on_browse)
-        top.addWidget(self.url_input, stretch=1)
+        self._top_row.addWidget(self.url_input, stretch=1)
 
         self.browse_btn = QPushButton("Browse")
         self.browse_btn.setIcon(icon("mdi6.magnify"))
         self.browse_btn.clicked.connect(self._on_browse)
-        top.addWidget(self.browse_btn)
-        layout.addLayout(top)
+        self._top_row.addWidget(self.browse_btn)
+        layout.addLayout(self._top_row)
 
         self.status_label = QLabel("")
         layout.addWidget(self.status_label)
@@ -61,24 +61,24 @@ class BaseBrowserPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
 
-        bottom = QHBoxLayout()
+        self._bottom_row = QHBoxLayout()
         self.select_all_btn = QPushButton("Select All")
         self.select_all_btn.setIcon(icon("mdi6.checkbox-multiple-marked-outline"))
         self.select_all_btn.clicked.connect(self._select_all)
-        bottom.addWidget(self.select_all_btn)
+        self._bottom_row.addWidget(self.select_all_btn)
 
         self.deselect_all_btn = QPushButton("Deselect All")
         self.deselect_all_btn.setIcon(icon("mdi6.checkbox-multiple-blank-outline"))
         self.deselect_all_btn.clicked.connect(self._deselect_all)
-        bottom.addWidget(self.deselect_all_btn)
+        self._bottom_row.addWidget(self.deselect_all_btn)
 
-        bottom.addStretch()
+        self._bottom_row.addStretch()
 
         self.download_btn = QPushButton("Download Selected")
         self.download_btn.setIcon(icon("mdi6.download"))
         self.download_btn.clicked.connect(self._on_download)
-        bottom.addWidget(self.download_btn)
-        layout.addLayout(bottom)
+        self._bottom_row.addWidget(self.download_btn)
+        layout.addLayout(self._bottom_row)
 
     # --- subclass extension point -------------------------------------------------
 
@@ -104,15 +104,21 @@ class BaseBrowserPanel(QWidget):
             self._fetcher.cancel()
             self._fetcher.wait()
 
-        self._videos.clear()
-        self.table.setRowCount(0)
-        self.browse_btn.setEnabled(False)
-
         fetcher = self._create_fetcher(url)
         if fetcher is None:
-            self.browse_btn.setEnabled(True)
             return
 
+        self._videos.clear()
+        self.table.setRowCount(0)
+        self._start_fetcher(fetcher)
+
+    def _start_fetcher(self, fetcher) -> None:
+        """Wire signals and start ``fetcher`` without clearing the current table.
+
+        Subclasses use this to launch additional fetchers (e.g. "Load more")
+        that append rows instead of replacing them.
+        """
+        self.browse_btn.setEnabled(False)
         self.status_label.setText(self._start_status_text())
         self._fetcher = fetcher
         fetcher.video_found.connect(self._on_video_found)
