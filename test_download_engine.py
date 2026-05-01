@@ -5,7 +5,70 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from downloader import DownloadResult
-from download_engine import DownloadEngine, DownloadWorker
+from download_engine import DownloadEngine, DownloadWorker, _resolve_thumbnail_sidecar
+
+
+class TestResolveThumbnailSidecar:
+    """Sidecar resolver — checks each known extension next to the video."""
+
+    def test_finds_jpg(self, tmp_path):
+        video = tmp_path / "abc_title.mp4"
+        video.write_bytes(b"\x00")
+        thumb = tmp_path / "abc_title.jpg"
+        thumb.write_bytes(b"\xFF\xD8\xFF")
+        assert _resolve_thumbnail_sidecar(str(video)) == str(thumb)
+
+    def test_finds_webp(self, tmp_path):
+        video = tmp_path / "abc.mp4"
+        video.write_bytes(b"\x00")
+        webp = tmp_path / "abc.webp"
+        webp.write_bytes(b"RIFF")
+        assert _resolve_thumbnail_sidecar(str(video)) == str(webp)
+
+    def test_finds_png(self, tmp_path):
+        video = tmp_path / "abc.mp4"
+        video.write_bytes(b"\x00")
+        png = tmp_path / "abc.png"
+        png.write_bytes(b"\x89PNG")
+        assert _resolve_thumbnail_sidecar(str(video)) == str(png)
+
+    def test_jpg_wins_over_webp(self, tmp_path):
+        """When both extensions exist, the resolver picks .jpg first."""
+        video = tmp_path / "abc.mp4"
+        video.write_bytes(b"\x00")
+        (tmp_path / "abc.jpg").write_bytes(b"\xFF\xD8\xFF")
+        (tmp_path / "abc.webp").write_bytes(b"RIFF")
+        assert _resolve_thumbnail_sidecar(str(video)).endswith(".jpg")
+
+    def test_finds_image_extension_for_tiktok(self, tmp_path):
+        """TikTok's CDN returns thumbnails as a generic ``.image`` sidecar.
+
+        yt-dlp doesn't rename the extension when the content-type is
+        unrecognized, so the resolver must accept ``.image`` alongside the
+        canonical extensions.
+        """
+        video = tmp_path / "7628_some_caption.mp4"
+        video.write_bytes(b"\x00")
+        thumb = tmp_path / "7628_some_caption.image"
+        thumb.write_bytes(b"\xFF\xD8\xFF")  # JPEG bytes wrapped in .image
+        assert _resolve_thumbnail_sidecar(str(video)) == str(thumb)
+
+    def test_recognized_ext_wins_over_image(self, tmp_path):
+        """If both ``.jpg`` and ``.image`` exist, prefer the canonical one."""
+        video = tmp_path / "abc.mp4"
+        video.write_bytes(b"\x00")
+        (tmp_path / "abc.image").write_bytes(b"\xFF\xD8\xFF")
+        (tmp_path / "abc.jpg").write_bytes(b"\xFF\xD8\xFF")
+        assert _resolve_thumbnail_sidecar(str(video)).endswith(".jpg")
+
+    def test_missing_returns_none(self, tmp_path):
+        assert _resolve_thumbnail_sidecar(str(tmp_path / "nope.mp4")) is None
+
+    def test_none_input(self):
+        assert _resolve_thumbnail_sidecar(None) is None
+
+    def test_empty_string_input(self):
+        assert _resolve_thumbnail_sidecar("") is None
 
 
 class TestDownloadWorker:

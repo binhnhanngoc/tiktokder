@@ -5,9 +5,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from version import __version__
+
 ROOT = Path(__file__).resolve().parent
 DIST_NAME = "TikTokDer"
-ZIP_STEM = "TikTokDer-portable"
+ZIP_STEM = f"TikTokDer-portable-{__version__}"
 
 
 def main() -> None:

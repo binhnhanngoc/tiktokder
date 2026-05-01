@@ -529,13 +529,15 @@ class TestGetYdlOpts:
         opts = get_ydl_opts("/out")
         assert "writesubtitles" not in opts
 
-    def test_ydl_opts_thumb_flag_set_when_enabled(self):
+    def test_ydl_opts_thumb_always_on_when_param_true(self):
+        """Thumbnails are mandatory in v1.4+ regardless of caller intent."""
         opts = get_ydl_opts("/out", write_thumb=True)
         assert opts["writethumbnail"] is True
 
-    def test_ydl_opts_thumb_default_off(self):
-        opts = get_ydl_opts("/out")
-        assert "writethumbnail" not in opts
+    def test_ydl_opts_thumb_always_on_when_param_false(self):
+        """Even with write_thumb=False (legacy default), the option is forced on."""
+        opts = get_ydl_opts("/out", write_thumb=False)
+        assert opts["writethumbnail"] is True
 
 
 class TestGetDownloadedIds:

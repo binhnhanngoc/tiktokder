@@ -41,6 +41,7 @@ from gui.status_bar_widget import StatusBarWidget
 from gui.tiktok_browser_panel import TikTokBrowserPanel
 from saved_channels_store import load_saved_channels, resolve_page_hint
 from url_parser import detect_platform
+from version import __version__
 
 
 def _resolve_icon() -> QIcon:
@@ -65,7 +66,7 @@ class MainWindow(QMainWindow):
         self.config = config
         self._initial_state = state or AppState()
 
-        self.setWindowTitle("TikTokDer")
+        self.setWindowTitle(f"TikTokDer v{__version__}")
         self.setWindowIcon(_resolve_icon())
         self._restore_geometry()
         self._setup_menu()
@@ -418,9 +419,10 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "About TikTokDer",
-            "TikTokDer - Video Downloader\n\n"
-            "Download TikTok and Facebook videos without watermarks.\n"
-            "Powered by yt-dlp.",
+            f"<h3>TikTokDer v{__version__}</h3>"
+            f"<p>TikTok &amp; Facebook batch video downloader.</p>"
+            f"<p>Download videos without watermarks. Powered by yt-dlp.</p>"
+            f"<p><small>Open source &mdash; see LICENSE.</small></p>",
         )
 
     # ── geometry / state ──────────────────────────────────────────────────

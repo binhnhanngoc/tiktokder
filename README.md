@@ -2,7 +2,7 @@
 
 A Python desktop and CLI tool for batch-downloading videos from TikTok and Facebook without watermarks. Dual interface: PySide6 GUI or CLI with Rich progress UI.
 
-**v1.3.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
+**v1.4.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
 
 ## Features
 
@@ -11,8 +11,8 @@ A Python desktop and CLI tool for batch-downloading videos from TikTok and Faceb
 - **Download Modes** — Single URL, batch files, user profiles, Facebook pages
 - **Platform-First UI** — Top-level **TikTok** and **Facebook** tabs, each with Channels (saved list) / Queue / Library sub-tabs; persistent global URL bar auto-routes pasted URLs by platform; status bar shows per-platform queue + done badges
 - **Saved Channels** — Save channels/pages with optional nicknames; right-click for `Download all new` (filters out already-downloaded and pre-cutoff videos)
-- **Library View** — Per-platform two-pane: uploader sidebar (★ marks saved channels) on the left, sorted/filtered history on the right; sort any column, filter by quality / date range / size / file status; right-click rows to open file, open folder, re-download, copy URL, or remove
-- **Quality Selector** — Default Quality setting (`Best`, `1080p`, `720p`, `480p`, `Audio only`) plus optional subtitle (`en`) and thumbnail downloads
+- **Library View** — Per-platform 3-pane: uploader sidebar (★ marks saved channels), sortable/filterable history table with a thumbnail column, and a right-side preview pane showing the large thumbnail, metadata, and full description; filter by quality / date range / size / file status; search box matches title, uploader, URL, and description text; right-click rows to open file, open folder, re-download, copy URL, or remove
+- **Quality Selector** — Default Quality setting (`Best`, `1080p`, `720p`, `480p`, `Audio only`) plus optional subtitle (`en`) downloads (thumbnails are always written as sidecars next to each video so the Library can show previews)
 - **Concurrent Downloads** — ThreadPoolExecutor with configurable workers (default: 3)
 - **Per-uploader Folder Layout** — Output organized as `downloads/{platform}/{uploader}/{id}_{title}.{ext}`
 - **Drag-and-drop** — Drop URLs or `.txt` files onto the global URL bar or platform tabs to queue downloads
@@ -103,13 +103,12 @@ Settings are split into three groups: **Global**, **TikTok**, **Facebook**. All 
 | Global | Delay Between Downloads | 0.0–10.0 s | gaussian jitter applied per platform (TT 1.5s, FB 3.0s mean) |
 | Global | Default Quality | Best / 1080p / 720p / 480p / Audio only | audio-only requires ffmpeg; writes `.m4a` |
 | Global | Write subtitles (en) | on / off | sidecar `.srt` next to video |
-| Global | Write thumbnail | on / off | sidecar `.jpg` next to video |
 | TikTok | Cookie Browser | None / chrome / firefox / edge | auto-extracts session cookies from your browser |
 | TikTok | Cookies File | path to Netscape `cookies.txt` | optional; **overrides Cookie Browser** when set. Lifts anonymous rate limits on profile scrapes/downloads. Export via *Get cookies.txt LOCALLY* extension while logged in |
 | Facebook | Cookies File | path to Netscape `cookies.txt` | optional; lifts **10-reel cap** on anon profile scraping. Export via *Get cookies.txt LOCALLY* extension while logged in |
 | Facebook | Default Max Scrolls | 1–50 | Playwright scroll budget in Channels/Browser sub-tab |
 
-
+_Note: Thumbnails are always written as sidecar `.jpg`/`.webp` next to each video so the Library can show previews. The toggle was removed in v1.4.0._
 
 ## Output
 
@@ -130,7 +129,7 @@ Filenames keep the `{video_id}_{title}.ext` shape so legacy flat-root files (fro
 
 ## History
 
-`data/history.json` persists rich `HistoryRecord` rows (schema v2) including platform, uploader, quality, size, downloaded-at timestamp, and file path. Old v1 files (a list of bare IDs) are auto-migrated on first write — no data is lost.
+`data/history.json` persists rich `HistoryRecord` rows (schema v3) including platform, uploader, quality, size, downloaded-at timestamp, file path, and the new **description** + **thumbnail_path** fields surfaced in the Library preview pane. Old v1 (list of bare IDs) and v2 files are auto-migrated on first write — no data is lost.
 
 A soft FIFO cap of **10 000** entries trims oldest metadata when exceeded; downloaded files on disk are untouched. Configurable via `AppConfig.history_max_entries`.
 

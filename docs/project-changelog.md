@@ -1,5 +1,29 @@
 # Project Changelog
 
+## Versioning Policy
+
+TikTokDer follows [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
+- **MAJOR** — breaking changes to CLI flags, config schema, history/state file format, or data folder layout.
+- **MINOR** — new features, additive config keys, new GUI panels (backwards compatible).
+- **PATCH** — bug fixes, dependency bumps, doc-only changes, performance tweaks (no UX or data changes).
+
+The single source of truth is `version.py` (`__version__`). The README badge line and the latest changelog entry below must match it on every release. See `docs/release-process.md` for the bump checklist.
+
+## [1.4.0] — 2026-05-01 — Library polish, cookies parity, versioning infra
+
+### Added
+- **Library**: thumbnails always-on (sidecars next to videos) + right-side preview pane with metadata and full description.
+- **Cookies**: TikTok `cookies.txt` parity with Facebook (per-platform cookie file paths).
+- **Channels**: Facebook downloads use page-name folders (per-channel browse cache).
+- **GUI**: progress bar styled with token-aware QSS.
+- **Versioning infrastructure**: `version.py` SSOT wired through GUI title bar, About dialog, CLI `--version`, build artifact filename, and Windows EXE metadata. New `docs/release-process.md`.
+
+### Fixed
+- **GUI**: rapid profile switch no longer hangs the window.
+
+### Notes
+- No data-format changes; no breaking config changes. Forward-compatible with 1.3.x state files.
+
 ## [1.3.1] — 2026-04-27 — Library panel sort & filters
 - **Library**: All columns now sortable by header click (Size sorts by raw bytes, default Date desc)
 - **Library**: Added compact filter row — Quality dropdown, Date range (From/To) with toggles, Size ≥ MB threshold, Status (Available/Missing via file scan). All filters debounced 200ms.

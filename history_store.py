@@ -1,9 +1,13 @@
-"""History persistence — schema v2 records with v1 migration.
+"""History persistence — schema v3 records with v1/v2 migration.
 
 Schema v1: top-level JSON list of video-id strings (legacy).
 Schema v2: ``{"schema": 2, "entries": [HistoryRecord, ...]}``.
+Schema v3: same shape as v2 plus ``description`` + ``thumbnail_path`` fields
+on each record.
 
-Read paths transparently accept both. Writes always emit v2.
+Read paths transparently accept v1, v2 and v3. Writes always emit the latest
+schema version (currently 3); older v2 records on disk gain ``None`` defaults
+for the new fields on first re-save.
 """
 
 from __future__ import annotations
@@ -17,13 +21,14 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+_ACCEPTED_DICT_SCHEMAS = (2, 3)
 DEFAULT_MAX_ENTRIES = 10000
 
 
 @dataclass
 class HistoryRecord:
-    """One downloaded-video metadata row (schema v2)."""
+    """One downloaded-video metadata row (schema v3)."""
 
     video_id: str
     platform: str | None = None        # "tiktok" | "facebook" | None
@@ -34,6 +39,8 @@ class HistoryRecord:
     file_path: str | None = None       # absolute path; relative also accepted
     size_bytes: int | None = None
     downloaded_at: str | None = None   # ISO8601 with tz
+    description: str | None = None     # full caption from yt-dlp info["description"]
+    thumbnail_path: str | None = None  # absolute path to sidecar .jpg/.webp/.png
 
 
 _RECORD_FIELDS = {f.name for f in fields(HistoryRecord)}
@@ -68,7 +75,7 @@ def _read_history_file(path: Path) -> tuple[int, list[HistoryRecord]]:
         records = [HistoryRecord(video_id=str(x)) for x in data if isinstance(x, str) and x]
         return 1, records
 
-    if isinstance(data, dict) and data.get("schema") == SCHEMA_VERSION:
+    if isinstance(data, dict) and data.get("schema") in _ACCEPTED_DICT_SCHEMAS:
         entries = data.get("entries") or []
         records = []
         for entry in entries:
@@ -77,7 +84,9 @@ def _read_history_file(path: Path) -> tuple[int, list[HistoryRecord]]:
             rec = _record_from_dict(entry)
             if rec is not None:
                 records.append(rec)
-        return SCHEMA_VERSION, records
+        # Returned version reflects the on-disk schema (older v2 files keep
+        # reading as v2 until something writes them back as v3).
+        return int(data.get("schema", SCHEMA_VERSION)), records
 
     logger.warning("History file %s has unrecognized shape; starting empty.", path)
     return 0, []

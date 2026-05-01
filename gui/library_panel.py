@@ -21,7 +21,7 @@ from collections import Counter
 from urllib.parse import urlparse
 
 from PySide6.QtCore import QDate, QTimer, Qt, Signal, Slot
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication, QPixmap, QPixmapCache
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -48,27 +48,44 @@ from gui._history_helpers import (
     open_path,
     reveal_in_file_manager,
 )
+from gui.library_preview_pane import (
+    PREVIEW_H as _PREVIEW_H,
+    PREVIEW_W as _PREVIEW_W,
+    LibraryPreviewPane,
+)
+from gui.library_thumbnail_delegate import (
+    THUMB_H as _THUMB_H,
+    THUMB_W as _THUMB_W,
+    LibraryThumbnailDelegate,
+)
 from saved_channels_store import SavedChannelsStore
 
-_HEADERS = ("Title", "Quality", "Size", "Date", "Path")
+# Column 0 header is blank — the icon-only column doesn't need a label.
+_HEADERS = ("", "Title", "Quality", "Size", "Date", "Path")
 _ALL_LABEL = "All"
 
 # Column indices — single source of truth for sort/render code.
-_COL_TITLE = 0
-_COL_QUALITY = 1
-_COL_SIZE = 2
-_COL_DATE = 3
-_COL_PATH = 4
+_COL_THUMB = 0
+_COL_TITLE = 1
+_COL_QUALITY = 2
+_COL_SIZE = 3
+_COL_DATE = 4
+_COL_PATH = 5
 
 # Sensible default widths in px. Path is the stretch column so its number is
 # only the lower bound — Qt grows it to fill the panel.
 _DEFAULT_WIDTHS = {
+    _COL_THUMB: 80,
     _COL_TITLE: 320,
     _COL_QUALITY: 80,
     _COL_SIZE: 90,
     _COL_DATE: 130,
     _COL_PATH: 240,
 }
+
+# Bump the per-process pixmap cache so the working set of Library thumbnails
+# (small + large preview combined) doesn't get evicted on every scroll.
+QPixmapCache.setCacheLimit(20 * 1024)  # kilobytes — 20 MB
 
 
 def _uploader_from_url(url: str | None) -> str | None:
@@ -144,7 +161,7 @@ class LibraryPanel(QWidget):
         right_layout.addLayout(self._build_filter_row())
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search title, URL...")
+        self.search_input.setPlaceholderText("Search title, uploader, URL, description…")
         right_layout.addWidget(self.search_input)
 
         self.stats_label = QLabel("")
@@ -159,7 +176,19 @@ class LibraryPanel(QWidget):
         for col in range(len(_HEADERS)):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
             self.table.setColumnWidth(col, _DEFAULT_WIDTHS[col])
+        # Thumb column is icon-only; lock its width so it can't be dragged
+        # narrower than the pixmap cell.
+        header.setSectionResizeMode(_COL_THUMB, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(_COL_THUMB, _DEFAULT_WIDTHS[_COL_THUMB])
         header.setStretchLastSection(True)
+
+        # Lazy-paint thumbnail delegate. Placeholder is a flat dark cell that
+        # matches the table's neutral background so empty rows don't pop.
+        placeholder = QPixmap(_THUMB_W, _THUMB_H)
+        placeholder.fill(QColor("#2a2a2a"))
+        self._thumb_delegate = LibraryThumbnailDelegate(placeholder, self)
+        self.table.setItemDelegateForColumn(_COL_THUMB, self._thumb_delegate)
+        self.table.verticalHeader().setDefaultSectionSize(_THUMB_H + 8)
 
         self.table.setSortingEnabled(True)
         self.table.sortByColumn(_COL_DATE, Qt.SortOrder.DescendingOrder)
@@ -171,8 +200,21 @@ class LibraryPanel(QWidget):
         right_layout.addWidget(self.table)
 
         splitter.addWidget(right)
+
+        # Preview pane (right) — populated on row selection. Placeholder pixmap
+        # matches the dark frame around the live thumbnail area so the empty
+        # state looks intentional, not broken.
+        preview_placeholder = QPixmap(_PREVIEW_W, _PREVIEW_H)
+        preview_placeholder.fill(QColor("#1c1c1c"))
+        self.preview_pane = LibraryPreviewPane(preview_placeholder, self)
+        splitter.addWidget(self.preview_pane)
+
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(2, 2)
+        # Selection wiring — pulls the HistoryRecord from the Title cell's
+        # UserRole and pushes it into the preview pane.
+        self.table.itemSelectionChanged.connect(self._on_selection_changed)
 
         # Debounced filter (200 ms). Single timer for search + every filter
         # control — they all funnel into _apply_filters() which re-runs the
@@ -319,6 +361,17 @@ class LibraryPanel(QWidget):
         self._active_uploader = item.data(Qt.ItemDataRole.UserRole)
         self._apply_filters()
 
+    @Slot()
+    def _on_selection_changed(self) -> None:
+        """Push the currently-selected HistoryRecord into the preview pane."""
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
+            self.preview_pane.set_record(None)
+            return
+        item = self.table.item(rows[0].row(), _COL_TITLE)
+        rec = item.data(Qt.ItemDataRole.UserRole) if item else None
+        self.preview_pane.set_record(rec if isinstance(rec, HistoryRecord) else None)
+
     # ── filter / render ───────────────────────────────────────────────────
 
     def _apply_filters(self) -> None:
@@ -342,7 +395,9 @@ class LibraryPanel(QWidget):
             if self._active_uploader and r.uploader != self._active_uploader:
                 continue
             if needle:
-                hay = " ".join(filter(None, [r.title, r.uploader, r.url])).lower()
+                hay = " ".join(
+                    filter(None, [r.title, r.uploader, r.url, r.description])
+                ).lower()
                 if needle not in hay:
                     continue
             if quality_filter and (r.quality or "") != quality_filter:
@@ -376,6 +431,12 @@ class LibraryPanel(QWidget):
         for rec in records:
             row = self.table.rowCount()
             self.table.insertRow(row)
+            # Thumb cell — empty text, sidecar path on UserRole; the delegate
+            # pulls the path from there during paint and ignores the text.
+            thumb_item = QTableWidgetItem("")
+            thumb_item.setFlags(thumb_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            thumb_item.setData(Qt.ItemDataRole.UserRole, rec.thumbnail_path)
+            self.table.setItem(row, _COL_THUMB, thumb_item)
             self.table.setItem(row, _COL_TITLE, QTableWidgetItem(rec.title or "—"))
             self.table.setItem(row, _COL_QUALITY, QTableWidgetItem(rec.quality or "—"))
             self.table.setItem(
@@ -385,6 +446,8 @@ class LibraryPanel(QWidget):
             )
             self.table.setItem(row, _COL_DATE, QTableWidgetItem(format_date(rec.downloaded_at)))
             self.table.setItem(row, _COL_PATH, QTableWidgetItem(rec.file_path or "—"))
+            # Title cell still owns the full HistoryRecord — the context menu
+            # and (Phase 4) selection handler both look it up here.
             self.table.item(row, _COL_TITLE).setData(Qt.ItemDataRole.UserRole, rec)
         self.table.setSortingEnabled(True)
 

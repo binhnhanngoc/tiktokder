@@ -1,4 +1,4 @@
-"""Tests for history_store.py — HistoryRecord schema v2 and v1 migration."""
+"""Tests for history_store.py — HistoryRecord schema v3 and v1/v2 migration."""
 
 import json
 
@@ -47,10 +47,31 @@ class TestReadHistoryFile:
         }
         path.write_text(json.dumps(payload), encoding="utf-8")
         version, records = _read_history_file(path)
-        assert version == SCHEMA_VERSION
+        # On-disk shape is preserved on read; v2 → v3 promotion only happens
+        # at write time, so the version reflects what was found on disk.
+        assert version == 2
         assert len(records) == 2
         assert records[0].uploader == "@u"
         assert records[1].platform == "facebook"
+
+    def test_v3_dict_returns_full_records_with_new_fields(self, tmp_path):
+        path = tmp_path / "history.json"
+        payload = {
+            "schema": 3,
+            "entries": [
+                {
+                    "video_id": "1",
+                    "platform": "tiktok",
+                    "description": "hello world",
+                    "thumbnail_path": "/tmp/1.jpg",
+                },
+            ],
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        version, records = _read_history_file(path)
+        assert version == SCHEMA_VERSION == 3
+        assert records[0].description == "hello world"
+        assert records[0].thumbnail_path == "/tmp/1.jpg"
 
     def test_malformed_json_returns_empty(self, tmp_path):
         path = tmp_path / "history.json"
@@ -109,20 +130,57 @@ class TestSaveLoadRoundTrip:
         loaded = load_history_records(path)
         assert loaded == records
 
-    def test_save_writes_schema_v2(self, tmp_path):
+    def test_save_writes_latest_schema(self, tmp_path):
         path = tmp_path / "history.json"
         save_history_records(path, [_record("xyz")])
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["schema"] == 2
+        assert data["schema"] == SCHEMA_VERSION == 3
         assert data["entries"][0]["video_id"] == "xyz"
+        # New v3 fields are present (as None) for records that don't set them.
+        assert data["entries"][0]["description"] is None
+        assert data["entries"][0]["thumbnail_path"] is None
 
-    def test_save_history_ids_writes_v2(self, tmp_path):
+    def test_save_history_ids_writes_latest_schema(self, tmp_path):
         path = tmp_path / "history.json"
         save_history_ids(path, {"3", "1", "2"})
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["schema"] == 2
+        assert data["schema"] == SCHEMA_VERSION == 3
         ids = sorted(e["video_id"] for e in data["entries"])
         assert ids == ["1", "2", "3"]
+
+    def test_v2_file_round_trips_to_v3(self, tmp_path):
+        path = tmp_path / "history.json"
+        v2_payload = {
+            "schema": 2,
+            "entries": [{
+                "video_id": "123",
+                "platform": "tiktok",
+                "uploader": "@alice",
+                "title": "Hello",
+                "url": "https://www.tiktok.com/@alice/video/123",
+                "quality": "1080p",
+                "file_path": "/tmp/x.mp4",
+                "size_bytes": 1024,
+                "downloaded_at": "2026-04-26T10:00:00+07:00",
+            }],
+        }
+        path.write_text(json.dumps(v2_payload), encoding="utf-8")
+        records = load_history_records(path)
+        assert len(records) == 1
+        assert records[0].video_id == "123"
+        # New v3 fields default to None when reading a v2 file.
+        assert records[0].description is None
+        assert records[0].thumbnail_path is None
+        # Re-saving promotes the file shape to v3 with the new fields present.
+        save_history_records(path, records)
+        reread = json.loads(path.read_text(encoding="utf-8"))
+        assert reread["schema"] == 3
+        entry = reread["entries"][0]
+        assert entry["description"] is None
+        assert entry["thumbnail_path"] is None
+        # Old fields preserved verbatim.
+        assert entry["uploader"] == "@alice"
+        assert entry["size_bytes"] == 1024
 
 
 class TestAddHistoryRecord:
@@ -148,13 +206,13 @@ class TestAddHistoryRecord:
         loaded = load_history_records(path)
         assert [r.video_id for r in loaded] == ["a", "b"]
 
-    def test_lazy_v1_to_v2_migration_via_add(self, tmp_path):
+    def test_lazy_v1_to_latest_migration_via_add(self, tmp_path):
         path = tmp_path / "history.json"
         # Seed v1 file.
         path.write_text(json.dumps(["old1", "old2"]), encoding="utf-8")
         add_history_record(path, _record("new", platform="tiktok"))
-        # Should now be v2.
+        # Should now be the latest schema.
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["schema"] == 2
+        assert data["schema"] == SCHEMA_VERSION == 3
         ids = [e["video_id"] for e in data["entries"]]
         assert ids == ["old1", "old2", "new"]

@@ -250,8 +250,12 @@ def get_ydl_opts(
         opts["writeautomaticsub"] = True
         opts["subtitleslangs"] = ["en"]
         opts["subtitlesformat"] = "srt/best"
-    if write_thumb:
-        opts["writethumbnail"] = True
+    # Thumbnails are always written as a sidecar so the Library tab can
+    # render previews. The legacy ``write_thumb`` parameter is kept on the
+    # signature for call-site compatibility but is now a no-op — callers may
+    # pass anything; we always force the option on.
+    _ = write_thumb
+    opts["writethumbnail"] = True
     return opts
 
 

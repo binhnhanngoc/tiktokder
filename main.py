@@ -8,6 +8,7 @@ from rich.console import Console
 from url_parser import validate_url, validate_facebook_url, read_batch_file, build_user_url
 from downloader import download_batch, get_downloaded_ids
 from config import _default_output_dir, get_platform_defaults
+from version import __version__
 
 console = Console()
 
@@ -15,6 +16,9 @@ console = Console()
 def parse_args() -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description="TikTok & Facebook Batch Video Downloader")
+    parser.add_argument(
+        "--version", "-V", action="version", version=f"TikTokDer {__version__}"
+    )
     parser.add_argument("url", nargs="?", help="Single TikTok or Facebook video URL")
     parser.add_argument("--batch", metavar="FILE", help="Text file with URLs (one per line)")
     parser.add_argument("--user", metavar="USERNAME", help="TikTok username to scrape")

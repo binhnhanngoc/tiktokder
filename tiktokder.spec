@@ -1,11 +1,59 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for TikTokDer — onedir build with GUI + CLI executables."""
 
+import os
+import sys
+from pathlib import Path
+
+# Ensure `from version import ...` resolves regardless of PyInstaller's invocation CWD.
+sys.path.insert(0, os.path.dirname(os.path.abspath(SPEC)))  # noqa: F821 (SPEC injected by PyInstaller)
+
 from PyInstaller.utils.hooks import (
     collect_data_files,
     collect_dynamic_libs,
     collect_submodules,
 )
+from PyInstaller.utils.win32.versioninfo import (
+    FixedFileInfo,
+    StringFileInfo,
+    StringStruct,
+    StringTable,
+    VarFileInfo,
+    VarStruct,
+    VSVersionInfo,
+)
+
+from version import __version_info__
+
+
+def _build_version_info() -> VSVersionInfo:
+    """Windows VERSIONINFO resource — same metadata for GUI + CLI EXE (DRY)."""
+    major, minor, patch = __version_info__
+    filevers = (major, minor, patch, 0)
+    ver_str = f"{major}.{minor}.{patch}"
+    return VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=filevers,
+            prodvers=filevers,
+            mask=0x3F,
+            flags=0x0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0),
+        ),
+        kids=[
+            StringFileInfo([StringTable("040904B0", [
+                StringStruct("CompanyName", "TikTokDer"),
+                StringStruct("FileDescription", "TikTok & Facebook Batch Video Downloader"),
+                StringStruct("FileVersion", ver_str),
+                StringStruct("ProductName", "TikTokDer"),
+                StringStruct("ProductVersion", ver_str),
+                StringStruct("OriginalFilename", "TikTokDer.exe"),
+            ])]),
+            VarFileInfo([VarStruct("Translation", [0x0409, 0x04B0])]),
+        ],
+    )
 
 # curl_cffi native libraries (TLS impersonation for yt-dlp)
 curl_cffi_datas = collect_data_files('curl_cffi')
@@ -28,18 +76,37 @@ qdarktheme_imports = collect_submodules('qdarktheme')
 # darkdetect picks platform backend dynamically
 darkdetect_imports = collect_submodules('darkdetect')
 
+# Playwright (GUI-only) — Python wrapper + driver/ Node runtime + Chromium browsers.
+# The browser binaries live OUTSIDE site-packages in %LOCALAPPDATA%/ms-playwright/,
+# so we explicitly mirror that cache into the bundle and point a runtime hook at it.
+playwright_datas = collect_data_files('playwright')
+playwright_bins = collect_dynamic_libs('playwright')
+playwright_imports = collect_submodules('playwright')
+
+_browsers_root = Path(os.environ.get('LOCALAPPDATA', '')) / 'ms-playwright'
+playwright_browser_datas = []
+if _browsers_root.is_dir():
+    for src in _browsers_root.rglob('*'):
+        if src.is_file():
+            rel_dir = src.parent.relative_to(_browsers_root)
+            playwright_browser_datas.append(
+                (str(src), str(Path('ms-playwright') / rel_dir))
+            )
+
 # ---------------------------------------------------------------------------
 # GUI entry point (app.py) — no console window
 # ---------------------------------------------------------------------------
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=curl_cffi_bins,
+    binaries=curl_cffi_bins + playwright_bins,
     datas=(
         curl_cffi_datas
         + certifi_datas
         + qtawesome_datas
         + qdarktheme_datas
+        + playwright_datas
+        + playwright_browser_datas
         + [('assets/icon.ico', 'assets'), ('assets/icon.png', 'assets')]
     ),
     hiddenimports=[
@@ -47,6 +114,7 @@ a = Analysis(
         *qtawesome_imports,
         *qdarktheme_imports,
         *darkdetect_imports,
+        *playwright_imports,
         'PySide6.QtCore',
         'PySide6.QtGui',
         'PySide6.QtWidgets',
@@ -55,8 +123,8 @@ a = Analysis(
         'curl_cffi.requests',
     ],
     hookspath=[],
+    runtime_hooks=['runtime_hooks/playwright_browsers.py'],
     excludes=[
-        'playwright',  # too large (~200MB Chromium), optional feature
         'pytest',
         'tkinter',
         'unittest',
@@ -78,6 +146,7 @@ exe = EXE(
     upx=False,
     console=False,  # GUI — no terminal window
     icon='assets/icon.ico',
+    version=_build_version_info(),
 )
 
 # ---------------------------------------------------------------------------
@@ -118,6 +187,7 @@ cli_exe = EXE(
     strip=False,
     upx=False,
     console=True,  # CLI needs terminal output
+    version=_build_version_info(),
 )
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from app_state import load_state, save_state
 from config import STATE_PATH, load_config, save_config
+from version import __version__
 
 
 def _icon_path() -> str:
@@ -25,6 +26,7 @@ def main() -> None:
     """Launch TikTokDer desktop app."""
     app = QApplication(sys.argv)
     app.setApplicationName("TikTokDer")
+    app.setApplicationVersion(__version__)
 
     icon_file = _icon_path()
     if os.path.exists(icon_file):

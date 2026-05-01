@@ -67,7 +67,6 @@ class SettingsPanel(QWidget):
         self.fb_scrolls_default_spin.valueChanged.connect(self._save)
         self.quality_combo.currentIndexChanged.connect(self._save)
         self.subs_check.stateChanged.connect(self._save)
-        self.thumb_check.stateChanged.connect(self._save)
 
     # ── group builders ────────────────────────────────────────────────────
 
@@ -124,14 +123,13 @@ class SettingsPanel(QWidget):
         self.quality_combo.setToolTip("Audio-only and merged-stream presets require ffmpeg on PATH.")
         form.addRow("Default Quality:", self.quality_combo)
 
-        # Subs / thumb.
+        # Subtitles toggle. Thumbnails were promoted to always-on in v1.4.0
+        # (Library tab needs them for previews); the legacy
+        # ``AppConfig.write_thumbnail`` field is kept untouched but no longer
+        # surfaced as a UI toggle.
         self.subs_check = QCheckBox()
         self.subs_check.setChecked(config.write_subtitles)
         form.addRow("Write subtitles (en):", self.subs_check)
-
-        self.thumb_check = QCheckBox()
-        self.thumb_check.setChecked(config.write_thumbnail)
-        form.addRow("Write thumbnail:", self.thumb_check)
 
         return group
 
@@ -247,7 +245,6 @@ class SettingsPanel(QWidget):
         self.config.facebook_max_scrolls_default = self.fb_scrolls_default_spin.value()
         self.config.quality_default = self.quality_combo.currentData() or "best"
         self.config.write_subtitles = self.subs_check.isChecked()
-        self.config.write_thumbnail = self.thumb_check.isChecked()
         save_config(self.config)
         self.settings_changed.emit()
 
@@ -262,7 +259,6 @@ class SettingsPanel(QWidget):
         self.fb_scrolls_default_spin.setValue(defaults.facebook_max_scrolls_default)
         self._select_quality(defaults.quality_default)
         self.subs_check.setChecked(defaults.write_subtitles)
-        self.thumb_check.setChecked(defaults.write_thumbnail)
         sys_btn = self._theme_buttons["system"]
         sys_btn.blockSignals(True)
         sys_btn.setChecked(True)

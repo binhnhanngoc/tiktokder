@@ -155,7 +155,9 @@ class TestHistory:
         assert h == set()
 
     def test_history_persists_sorted(self, tmp_path):
-        """save_history writes schema v2 with bare records, ordered by id."""
+        """save_history writes the latest schema with bare records, ordered by id."""
+        from history_store import SCHEMA_VERSION
+
         history_path = tmp_path / "history.json"
         history_dir = tmp_path
         ids = {"c_id", "a_id", "b_id"}
@@ -164,7 +166,7 @@ class TestHistory:
             save_history(ids)
 
         data = json.loads(history_path.read_text(encoding="utf-8"))
-        assert data["schema"] == 2
+        assert data["schema"] == SCHEMA_VERSION
         ordered = [entry["video_id"] for entry in data["entries"]]
         assert ordered == ["a_id", "b_id", "c_id"]
 

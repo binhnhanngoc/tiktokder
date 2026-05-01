@@ -183,21 +183,27 @@ def _seed_varied_history(path: Path) -> None:
 
 
 def test_library_panel_columns_are_interactive_and_stretch_last(qapp, tmp_path, monkeypatch) -> None:
-    """All columns drag-resizable; Path (last) absorbs leftover space."""
+    """User columns drag-resizable; Path (last) absorbs leftover space.
+
+    The thumbnail column at index 0 is intentionally Fixed so it can't shrink
+    below the pixmap width — only the data columns are checked here.
+    """
     monkeypatch.setattr("gui.library_panel.load_history_records",
                         lambda: __import__("history_store").load_history_records(tmp_path / "history.json"))
     _seed_varied_history(tmp_path / "history.json")
 
     from PySide6.QtWidgets import QHeaderView
-    from gui.library_panel import LibraryPanel
+    from gui.library_panel import LibraryPanel, _COL_THUMB
 
     panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
     panel.refresh()
     header = panel.table.horizontalHeader()
 
-    # All five sections — including Title (col 0) — must be Interactive.
     for col in range(panel.table.columnCount()):
-        assert header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive
+        if col == _COL_THUMB:
+            assert header.sectionResizeMode(col) == QHeaderView.ResizeMode.Fixed
+        else:
+            assert header.sectionResizeMode(col) == QHeaderView.ResizeMode.Interactive
     assert header.stretchLastSection() is True
 
 
@@ -206,13 +212,13 @@ def test_library_panel_default_sort_is_date_desc(qapp, tmp_path, monkeypatch) ->
                         lambda: __import__("history_store").load_history_records(tmp_path / "history.json"))
     _seed_varied_history(tmp_path / "history.json")
 
-    from gui.library_panel import LibraryPanel
+    from gui.library_panel import LibraryPanel, _COL_TITLE
 
     panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
     panel.refresh()
 
-    # Date column = 3. Top row should be the newest record (April > Feb > Jan).
-    titles = [panel.table.item(r, 0).text() for r in range(panel.table.rowCount())]
+    # Top row should be the newest record (April > Feb > Jan).
+    titles = [panel.table.item(r, _COL_TITLE).text() for r in range(panel.table.rowCount())]
     assert titles == [
         "newest medium 1080",
         "middle large 1080",
@@ -228,13 +234,13 @@ def test_library_panel_size_column_sorts_numerically(qapp, tmp_path, monkeypatch
                         lambda: __import__("history_store").load_history_records(tmp_path / "history.json"))
     _seed_varied_history(tmp_path / "history.json")
 
-    from gui.library_panel import LibraryPanel
+    from gui.library_panel import LibraryPanel, _COL_SIZE, _COL_TITLE
 
     panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
     panel.refresh()
 
-    panel.table.sortByColumn(2, _Qt.SortOrder.AscendingOrder)  # Size col asc
-    titles = [panel.table.item(r, 0).text() for r in range(panel.table.rowCount())]
+    panel.table.sortByColumn(_COL_SIZE, _Qt.SortOrder.AscendingOrder)
+    titles = [panel.table.item(r, _COL_TITLE).text() for r in range(panel.table.rowCount())]
     # 500K < 50M < 200M — text-sort would put "200.0 MB" between "50.0 MB" and "500.0 KB".
     assert titles == [
         "oldest small 720",
@@ -273,7 +279,8 @@ def test_library_panel_size_threshold_filter(qapp, tmp_path, monkeypatch) -> Non
     panel.size_min_spin.setValue(100)  # ≥ 100 MB → only the 200 MB record qualifies
     panel._apply_filters()
     assert panel.table.rowCount() == 1
-    assert panel.table.item(0, 0).text() == "middle large 1080"
+    from gui.library_panel import _COL_TITLE
+    assert panel.table.item(0, _COL_TITLE).text() == "middle large 1080"
 
 
 def test_library_panel_date_range_filter(qapp, tmp_path, monkeypatch) -> None:
@@ -283,7 +290,7 @@ def test_library_panel_date_range_filter(qapp, tmp_path, monkeypatch) -> None:
                         lambda: __import__("history_store").load_history_records(tmp_path / "history.json"))
     _seed_varied_history(tmp_path / "history.json")
 
-    from gui.library_panel import LibraryPanel
+    from gui.library_panel import LibraryPanel, _COL_TITLE
 
     panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
     panel.refresh()
@@ -295,7 +302,7 @@ def test_library_panel_date_range_filter(qapp, tmp_path, monkeypatch) -> None:
     panel.to_date_edit.setDate(QDate(2026, 3, 1))
     panel._apply_filters()
     assert panel.table.rowCount() == 1
-    assert panel.table.item(0, 0).text() == "middle large 1080"
+    assert panel.table.item(0, _COL_TITLE).text() == "middle large 1080"
 
 
 def test_library_panel_status_filter_missing_only(qapp, tmp_path, monkeypatch) -> None:
@@ -303,7 +310,7 @@ def test_library_panel_status_filter_missing_only(qapp, tmp_path, monkeypatch) -
                         lambda: __import__("history_store").load_history_records(tmp_path / "history.json"))
     _seed_varied_history(tmp_path / "history.json")
 
-    from gui.library_panel import LibraryPanel
+    from gui.library_panel import LibraryPanel, _COL_TITLE
 
     panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
     panel.refresh()
@@ -312,7 +319,140 @@ def test_library_panel_status_filter_missing_only(qapp, tmp_path, monkeypatch) -
     panel.status_combo.setCurrentIndex(idx)
     panel._apply_filters()
     assert panel.table.rowCount() == 1
-    assert panel.table.item(0, 0).text() == "middle large 1080"  # the /nonexistent/ one
+    assert panel.table.item(0, _COL_TITLE).text() == "middle large 1080"  # the /nonexistent/ one
+
+
+# ── Description / preview / perf-smoke ───────────────────────────────────
+
+
+def _seed_described_history(path: Path) -> None:
+    """Records with distinct description tokens for substring-search tests."""
+    save_history_records(
+        path,
+        [
+            HistoryRecord(video_id="d1", platform="tiktok", uploader="u",
+                          title="A", url="https://x/1",
+                          description="winter sunset over the lake"),
+            HistoryRecord(video_id="d2", platform="tiktok", uploader="u",
+                          title="B", url="https://x/2",
+                          description="cooking pasta carbonara"),
+            HistoryRecord(video_id="d3", platform="tiktok", uploader="u",
+                          title="C", url="https://x/3", description=None),
+        ],
+    )
+
+
+def test_search_matches_description_text(qapp, tmp_path, monkeypatch) -> None:
+    """Typing a description-only token returns the record (and not the others)."""
+    monkeypatch.setattr("gui.library_panel.load_history_records",
+                        lambda: __import__("history_store").load_history_records(tmp_path / "history.json"))
+    _seed_described_history(tmp_path / "history.json")
+
+    from gui.library_panel import LibraryPanel, _COL_TITLE
+
+    panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
+    panel.refresh()
+    assert panel.table.rowCount() == 3
+
+    panel.search_input.setText("sunset")
+    panel._apply_filters()  # bypass the 200 ms debounce
+    assert panel.table.rowCount() == 1
+    assert panel.table.item(0, _COL_TITLE).text() == "A"
+
+    panel.search_input.setText("carbonara")
+    panel._apply_filters()
+    assert panel.table.rowCount() == 1
+    assert panel.table.item(0, _COL_TITLE).text() == "B"
+
+
+def test_search_does_not_crash_on_none_description(qapp, tmp_path, monkeypatch) -> None:
+    """A row with description=None must not raise during the search predicate."""
+    monkeypatch.setattr("gui.library_panel.load_history_records",
+                        lambda: __import__("history_store").load_history_records(tmp_path / "history.json"))
+    _seed_described_history(tmp_path / "history.json")
+
+    from gui.library_panel import LibraryPanel
+
+    panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
+    panel.refresh()
+    panel.search_input.setText("nothing-matches-this")
+    panel._apply_filters()
+    assert panel.table.rowCount() == 0
+
+
+def test_preview_pane_resets_on_empty_selection(qapp, tmp_path, monkeypatch) -> None:
+    """Clearing the table selection puts the preview pane back into empty state."""
+    monkeypatch.setattr("gui.library_panel.load_history_records",
+                        lambda: __import__("history_store").load_history_records(tmp_path / "history.json"))
+    _seed_described_history(tmp_path / "history.json")
+
+    from gui.library_panel import LibraryPanel
+
+    panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
+    panel.refresh()
+
+    panel.table.selectRow(0)
+    selected = panel.preview_pane.title_label.text()
+    assert selected != "Select a video to see details"
+
+    panel.table.clearSelection()
+    assert panel.preview_pane.title_label.text() == "Select a video to see details"
+
+
+def test_library_panel_renders_thumbnail_column(qapp, tmp_path, monkeypatch) -> None:
+    """Column 0 carries the thumbnail path on UserRole; Title still owns the record."""
+    monkeypatch.setattr("gui.library_panel.load_history_records",
+                        lambda: __import__("history_store").load_history_records(tmp_path / "history.json"))
+    save_history_records(
+        tmp_path / "history.json",
+        [
+            HistoryRecord(video_id="t1", platform="tiktok", uploader="u",
+                          title="A", url="https://x/1",
+                          thumbnail_path="/tmp/a.jpg"),
+        ],
+    )
+
+    from PySide6.QtCore import Qt as _Qt
+    from gui.library_panel import LibraryPanel, _COL_THUMB, _COL_TITLE
+
+    panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
+    panel.refresh()
+    assert panel.table.rowCount() == 1
+    thumb_item = panel.table.item(0, _COL_THUMB)
+    assert thumb_item is not None
+    assert thumb_item.data(_Qt.ItemDataRole.UserRole) == "/tmp/a.jpg"
+    title_item = panel.table.item(0, _COL_TITLE)
+    rec = title_item.data(_Qt.ItemDataRole.UserRole)
+    assert isinstance(rec, HistoryRecord)
+    assert rec.video_id == "t1"
+
+
+@pytest.mark.slow
+def test_library_panel_renders_10k_rows_without_crash(qapp, tmp_path, monkeypatch) -> None:
+    """Synthetic 10k-row stress: panel must construct + filter without throwing."""
+    records = [
+        HistoryRecord(
+            video_id=str(i),
+            platform="tiktok",
+            uploader=f"u{i % 50}",
+            title=f"video {i}",
+            url=f"https://example.com/{i}",
+            quality="1080p",
+            file_path=f"/tmp/{i}.mp4",
+            size_bytes=1024 * (i % 100),
+            downloaded_at="2026-04-26T10:00:00+07:00",
+            description=f"desc {i}",
+            thumbnail_path=None,
+        )
+        for i in range(10_000)
+    ]
+    monkeypatch.setattr("gui.library_panel.load_history_records", lambda: records)
+
+    from gui.library_panel import LibraryPanel
+
+    panel = LibraryPanel(platform="tiktok", saved_store=SavedChannelsStore())
+    panel.refresh()
+    assert panel.table.rowCount() == 10_000
 
 
 # ── AppState round-trip for library uploader fields ──────────────────────

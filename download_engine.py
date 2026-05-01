@@ -1,5 +1,6 @@
 """QThread-based download engine with Qt signals for GUI progress updates."""
 
+import os
 import random
 from datetime import datetime, timezone
 
@@ -13,6 +14,32 @@ from config import (
 )
 from downloader import DownloadResult, download_video
 from url_parser import detect_platform, extract_video_id
+
+
+# Order matches yt-dlp's writethumbnail extension preference (jpg first on most
+# extractors; webp is increasingly common; png is the rare case). TikTok's CDN
+# returns thumbnails with no recognized image content-type, so yt-dlp lands
+# them as ``.image`` — content is real JPEG/WebP bytes, only the extension is
+# generic. We probe for it last so platforms with proper extensions still win.
+_THUMB_EXTS = (".jpg", ".jpeg", ".webp", ".png", ".image")
+
+
+def _resolve_thumbnail_sidecar(video_path: str | None) -> str | None:
+    """Return path to a thumbnail sidecar next to ``video_path``, else ``None``.
+
+    yt-dlp's ``writethumbnail`` lands beside the video as
+    ``{basename}.{jpg|webp|png}``. We probe each extension in order; first
+    match wins. ``os.path.exists`` is cheaper than ``os.listdir`` on uploader
+    folders that may hold thousands of files.
+    """
+    if not video_path:
+        return None
+    base, _ext = os.path.splitext(video_path)
+    for ext in _THUMB_EXTS:
+        candidate = base + ext
+        if os.path.exists(candidate):
+            return candidate
+    return None
 
 
 class DownloadWorker(QThread):
@@ -310,6 +337,11 @@ class DownloadEngine(QObject):
             or info.get("filesize")
             or info.get("filesize_approx")
         )
+        description = info.get("description")
+        if isinstance(description, str):
+            description = description.strip() or None
+        else:
+            description = None
         return HistoryRecord(
             video_id=result.video_id or str(info.get("id", "")),
             platform=detect_platform(url),
@@ -320,6 +352,8 @@ class DownloadEngine(QObject):
             file_path=file_path,
             size_bytes=size if isinstance(size, int) else None,
             downloaded_at=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+            description=description,
+            thumbnail_path=_resolve_thumbnail_sidecar(file_path),
         )
 
     def clear_dedup(self, urls: list[str] | None = None) -> None:
