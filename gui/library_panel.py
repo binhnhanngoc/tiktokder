@@ -130,6 +130,7 @@ class LibraryPanel(QWidget):
 
     redownload_requested = Signal(str)         # url
     remove_history_requested = Signal(str)     # video_id
+    play_requested = Signal(object)            # HistoryRecord
 
     def __init__(
         self,
@@ -197,6 +198,9 @@ class LibraryPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_context_menu)
+        # Double-click → in-app player. Single-click selection still drives
+        # the static thumbnail/metadata preview below (existing behavior).
+        self.table.cellDoubleClicked.connect(self._on_row_double_clicked)
         right_layout.addWidget(self.table)
 
         splitter.addWidget(right)
@@ -207,6 +211,8 @@ class LibraryPanel(QWidget):
         preview_placeholder = QPixmap(_PREVIEW_W, _PREVIEW_H)
         preview_placeholder.fill(QColor("#1c1c1c"))
         self.preview_pane = LibraryPreviewPane(preview_placeholder, self)
+        # Double-click on a row → preview pane plays it inline.
+        self.play_requested.connect(self.preview_pane.play)
         splitter.addWidget(self.preview_pane)
 
         splitter.setStretchFactor(0, 1)
@@ -371,6 +377,14 @@ class LibraryPanel(QWidget):
         item = self.table.item(rows[0].row(), _COL_TITLE)
         rec = item.data(Qt.ItemDataRole.UserRole) if item else None
         self.preview_pane.set_record(rec if isinstance(rec, HistoryRecord) else None)
+
+    @Slot(int, int)
+    def _on_row_double_clicked(self, row: int, _column: int) -> None:
+        """Emit ``play_requested`` for the row's HistoryRecord."""
+        item = self.table.item(row, _COL_TITLE)
+        rec = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if isinstance(rec, HistoryRecord):
+            self.play_requested.emit(rec)
 
     # ── filter / render ───────────────────────────────────────────────────
 

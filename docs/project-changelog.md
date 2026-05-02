@@ -9,6 +9,21 @@ TikTokDer follows [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 
 The single source of truth is `version.py` (`__version__`). The README badge line and the latest changelog entry below must match it on every release. See `docs/release-process.md` for the bump checklist.
 
+## [Unreleased] — In-app player
+
+### Added
+- **Inline Library playback** — double-clicking a Library row plays the video inside the right-side preview pane via `QStackedWidget` (thumbnail ↔ player). Replaces the previous "Open in OS player" bounce. Transport bar (play/pause + scrubber + time label), letterbox aspect ratio, audio-only files keep the thumbnail visible.
+- **Resume-from-position** — after closing or switching records, the next play resumes within (5s, duration−5s) of the saved offset. Position writes are debounced to one disk hit per 5s window plus a final write on stop / pause / source-change / window close.
+- **Keyboard shortcuts** (active only when the player page has focus): `J`/`L` = ±10s, `←`/`→` = ±5s, `space`/`K` = toggle play/pause.
+- **Codec fallback** — if `QMediaPlayer.errorOccurred` fires (VP9, exotic containers, etc.), the video area swaps to a small "Open externally" panel that hands off to the OS default player. No crashes, no retry loops.
+- **HistoryRecord schema v4** — additive: new `last_played_at` and `play_position_seconds` fields. Read paths transparently accept v1 / v2 / v3 / v4. `update_history_record_fields(path, video_id, **patch)` helper added for atomic single-record updates without rewriting the full file model.
+- **PyInstaller spec** — bundles `PySide6.QtMultimedia` + `QtMultimediaWidgets` and the multimedia plugin DLLs (`windowsmediaplugin.dll`, `ffmpegmediaplugin.dll`). Fallback handles both `plugins/multimedia` and legacy `Qt/plugins/multimedia` wheel layouts.
+- **28 new tests** (`test_history_records.py` v4 suite + `test_library_player.py`); 455 total pass repo-wide.
+
+### Notes
+- Schema bump is forward-compat: a v4 file loads cleanly on a v4 binary; downgrading to a pre-v4 binary returns an empty list (documented behavior matching the v2→v3 path).
+- Manual clean-VM smoke for the frozen exe is deferred to the next release build (per phase-04 plan).
+
 ## [1.5.0] — 2026-05-02 — Health View
 
 ### Added

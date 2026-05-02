@@ -13,6 +13,7 @@ from history_store import (
     load_history_records,
     save_history_ids,
     save_history_records,
+    update_history_record_fields,
 )
 
 
@@ -69,9 +70,12 @@ class TestReadHistoryFile:
         }
         path.write_text(json.dumps(payload), encoding="utf-8")
         version, records = _read_history_file(path)
-        assert version == SCHEMA_VERSION == 3
+        # On-disk version preserved; v4 fields default to None on read.
+        assert version == 3
         assert records[0].description == "hello world"
         assert records[0].thumbnail_path == "/tmp/1.jpg"
+        assert records[0].last_played_at is None
+        assert records[0].play_position_seconds is None
 
     def test_malformed_json_returns_empty(self, tmp_path):
         path = tmp_path / "history.json"
@@ -134,21 +138,23 @@ class TestSaveLoadRoundTrip:
         path = tmp_path / "history.json"
         save_history_records(path, [_record("xyz")])
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["schema"] == SCHEMA_VERSION == 3
+        assert data["schema"] == SCHEMA_VERSION == 4
         assert data["entries"][0]["video_id"] == "xyz"
-        # New v3 fields are present (as None) for records that don't set them.
+        # New fields are present (as None) for records that don't set them.
         assert data["entries"][0]["description"] is None
         assert data["entries"][0]["thumbnail_path"] is None
+        assert data["entries"][0]["last_played_at"] is None
+        assert data["entries"][0]["play_position_seconds"] is None
 
     def test_save_history_ids_writes_latest_schema(self, tmp_path):
         path = tmp_path / "history.json"
         save_history_ids(path, {"3", "1", "2"})
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["schema"] == SCHEMA_VERSION == 3
+        assert data["schema"] == SCHEMA_VERSION == 4
         ids = sorted(e["video_id"] for e in data["entries"])
         assert ids == ["1", "2", "3"]
 
-    def test_v2_file_round_trips_to_v3(self, tmp_path):
+    def test_v2_file_round_trips_to_latest(self, tmp_path):
         path = tmp_path / "history.json"
         v2_payload = {
             "schema": 2,
@@ -168,16 +174,20 @@ class TestSaveLoadRoundTrip:
         records = load_history_records(path)
         assert len(records) == 1
         assert records[0].video_id == "123"
-        # New v3 fields default to None when reading a v2 file.
+        # New fields default to None when reading older files.
         assert records[0].description is None
         assert records[0].thumbnail_path is None
-        # Re-saving promotes the file shape to v3 with the new fields present.
+        assert records[0].last_played_at is None
+        assert records[0].play_position_seconds is None
+        # Re-saving promotes the file shape to the latest schema.
         save_history_records(path, records)
         reread = json.loads(path.read_text(encoding="utf-8"))
-        assert reread["schema"] == 3
+        assert reread["schema"] == SCHEMA_VERSION
         entry = reread["entries"][0]
         assert entry["description"] is None
         assert entry["thumbnail_path"] is None
+        assert entry["last_played_at"] is None
+        assert entry["play_position_seconds"] is None
         # Old fields preserved verbatim.
         assert entry["uploader"] == "@alice"
         assert entry["size_bytes"] == 1024
@@ -213,6 +223,91 @@ class TestAddHistoryRecord:
         add_history_record(path, _record("new", platform="tiktok"))
         # Should now be the latest schema.
         data = json.loads(path.read_text(encoding="utf-8"))
-        assert data["schema"] == SCHEMA_VERSION == 3
+        assert data["schema"] == SCHEMA_VERSION == 4
         ids = [e["video_id"] for e in data["entries"]]
         assert ids == ["old1", "old2", "new"]
+
+
+class TestSchemaV4:
+    """Schema v4 — last_played_at + play_position_seconds round-trips."""
+
+    def test_load_v3_file_into_v4_dataclass(self, tmp_path):
+        path = tmp_path / "history.json"
+        v3_payload = {
+            "schema": 3,
+            "entries": [{
+                "video_id": "abc",
+                "platform": "tiktok",
+                "uploader": "@u",
+                "title": "t",
+                "description": "d",
+                "thumbnail_path": "/tmp/t.jpg",
+            }],
+        }
+        path.write_text(json.dumps(v3_payload), encoding="utf-8")
+        records = load_history_records(path)
+        assert len(records) == 1
+        # v4-only fields default to None when reading older files.
+        assert records[0].last_played_at is None
+        assert records[0].play_position_seconds is None
+        # v3 fields preserved.
+        assert records[0].description == "d"
+        assert records[0].thumbnail_path == "/tmp/t.jpg"
+
+    def test_save_then_load_v4_round_trip(self, tmp_path):
+        path = tmp_path / "history.json"
+        rec = HistoryRecord(
+            video_id="abc",
+            last_played_at="2026-05-02T10:00:00+00:00",
+            play_position_seconds=42.5,
+        )
+        save_history_records(path, [rec])
+        loaded = load_history_records(path)
+        assert len(loaded) == 1
+        assert loaded[0].last_played_at == "2026-05-02T10:00:00+00:00"
+        assert loaded[0].play_position_seconds == 42.5
+        # File on disk reflects schema v4.
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["schema"] == 4
+
+    def test_update_history_record_fields_atomic_patch(self, tmp_path):
+        path = tmp_path / "history.json"
+        save_history_records(path, [
+            _record("a", title="alpha"),
+            _record("b", title="beta"),
+            _record("c", title="gamma"),
+        ])
+        update_history_record_fields(path, "b", play_position_seconds=12.5)
+        loaded = {r.video_id: r for r in load_history_records(path)}
+        assert loaded["b"].play_position_seconds == 12.5
+        # Other records untouched.
+        assert loaded["a"].play_position_seconds is None
+        assert loaded["c"].play_position_seconds is None
+        # Titles preserved.
+        assert loaded["a"].title == "alpha"
+        assert loaded["b"].title == "beta"
+        assert loaded["c"].title == "gamma"
+        # File still valid v4.
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["schema"] == 4
+
+    def test_update_history_record_fields_missing_video_id_no_op(self, tmp_path):
+        path = tmp_path / "history.json"
+        save_history_records(path, [_record("a", title="alpha")])
+        # Should not raise, should not corrupt file.
+        update_history_record_fields(path, "missing", play_position_seconds=1.0)
+        loaded = load_history_records(path)
+        assert len(loaded) == 1
+        assert loaded[0].play_position_seconds is None
+
+    def test_update_history_record_fields_filters_unknown_keys(self, tmp_path):
+        path = tmp_path / "history.json"
+        save_history_records(path, [_record("a", title="alpha")])
+        # Unknown keys silently dropped — only valid record fields applied.
+        update_history_record_fields(
+            path, "a", garbage="x", play_position_seconds=7.0,
+        )
+        loaded = load_history_records(path)
+        assert loaded[0].play_position_seconds == 7.0
+        assert loaded[0].title == "alpha"
+

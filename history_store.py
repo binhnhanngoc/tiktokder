@@ -1,13 +1,15 @@
-"""History persistence — schema v3 records with v1/v2 migration.
+"""History persistence — schema v4 records with v1/v2/v3 migration.
 
 Schema v1: top-level JSON list of video-id strings (legacy).
 Schema v2: ``{"schema": 2, "entries": [HistoryRecord, ...]}``.
 Schema v3: same shape as v2 plus ``description`` + ``thumbnail_path`` fields
 on each record.
+Schema v4: same shape as v3 plus ``last_played_at`` + ``play_position_seconds``
+per record (populated by the in-app player; ``None`` for never-played rows).
 
-Read paths transparently accept v1, v2 and v3. Writes always emit the latest
-schema version (currently 3); older v2 records on disk gain ``None`` defaults
-for the new fields on first re-save.
+Read paths transparently accept v1, v2, v3 and v4. Writes always emit the
+latest schema version (currently 4); older records on disk gain ``None``
+defaults for the new fields on first re-save.
 """
 
 from __future__ import annotations
@@ -21,14 +23,14 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
-_ACCEPTED_DICT_SCHEMAS = (2, 3)
+SCHEMA_VERSION = 4
+_ACCEPTED_DICT_SCHEMAS = (2, 3, 4)
 DEFAULT_MAX_ENTRIES = 10000
 
 
 @dataclass
 class HistoryRecord:
-    """One downloaded-video metadata row (schema v3)."""
+    """One downloaded-video metadata row (schema v4)."""
 
     video_id: str
     platform: str | None = None        # "tiktok" | "facebook" | None
@@ -41,6 +43,8 @@ class HistoryRecord:
     downloaded_at: str | None = None   # ISO8601 with tz
     description: str | None = None     # full caption from yt-dlp info["description"]
     thumbnail_path: str | None = None  # absolute path to sidecar .jpg/.webp/.png
+    last_played_at: str | None = None         # ISO8601 with tz; updated on play
+    play_position_seconds: float | None = None  # seconds, for resume
 
 
 _RECORD_FIELDS = {f.name for f in fields(HistoryRecord)}
@@ -148,3 +152,28 @@ def save_history_ids(path: Path, ids: set[str]) -> None:
     """Back-compat shim — wrap each id in a bare HistoryRecord and persist as v2."""
     records = [HistoryRecord(video_id=i) for i in sorted(ids)]
     save_history_records(path, records)
+
+
+def update_history_record_fields(path: Path, video_id: str, **patch) -> None:
+    """Atomically patch known fields of one record (matched by ``video_id``).
+
+    Used by the in-app player to persist resume position without rewriting the
+    whole record. Unknown keys are ignored. No-ops if the record is missing.
+    """
+    if not patch:
+        return
+    valid = {k: v for k, v in patch.items() if k in _RECORD_FIELDS and k != "video_id"}
+    if not valid:
+        return
+    _, records = _read_history_file(path)
+    if not records:
+        return
+    changed = False
+    for rec in records:
+        if rec.video_id == video_id:
+            for k, v in valid.items():
+                setattr(rec, k, v)
+            changed = True
+            break
+    if changed:
+        save_history_records(path, records)

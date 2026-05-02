@@ -42,7 +42,7 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 
 ### v1.2.0 additions
 - `app_state.py` — UI state persistence (Download queue + Channel/Page browse snapshots) in `data/state.json`. Tolerant load.
-- `history_store.py` — schema-v2 history persistence with v1 auto-migration, atomic writes, FIFO cap.
+- `history_store.py` — schema-v4 history persistence (v1/v2/v3 transparent migration), atomic writes, FIFO cap, plus `update_history_record_fields(path, video_id, **patch)` for atomic single-record updates (used by the in-app player to persist resume position without rewriting the model).
 - `path_builder.py` — pure helpers for slugify + platform/uploader-aware yt-dlp `outtmpl`.
 - `gui/base_browser_panel.py`, `gui/tiktok_browser_panel.py`, `gui/facebook_browser_panel.py` — per-platform sub-panels.
 
@@ -221,10 +221,10 @@ A persistent `GlobalUrlBar` sits above the tab widget; a `StatusBarWidget` shows
 - `SavedChannelsPanel` — saved-channel list above an injected browser panel; right-click for Browse/Refresh, Download all new (confirm dialog >10), Rename + notes, Edit URL, Star/Unstar, Remove.
 - `LibraryPanel` — **3-pane layout (v1.4.0):** left uploader sidebar (frequency-sorted, ★ for saved channels), middle sortable/filterable history table with thumbnail column, right preview pane. ★ marks uploaders with saved channels; right-click for Open file / Open folder / Re-download / Copy URL / Remove. **All columns sortable by header click** (Size numeric, Date chronologic, default Date desc). **Advanced filter row (v1.4.0):** Quality dropdown, From/To date pickers (toggleable), Size ≥ MB threshold, Status (Available/Missing via `os.path.exists`), search box (200ms debounce, matches title/uploader/URL/description). All filters combined (AND logic).
 
-#### 12a. `gui/library_preview_pane.py` (NEW v1.4.0)
-**Purpose:** Right-pane preview widget for Library
-**Key Class:** `LibraryPreviewPane(QWidget)` — cached large thumbnail (QPixmapCache "large:" prefix), metadata form (date/size/uploader/quality/views/platform), full description in QTextEdit.
-**Trigger:** Single-click row in history table.
+#### 12a. `gui/library_preview_pane.py` (v1.4.0; in-app player added Unreleased)
+**Purpose:** Right-pane preview widget for Library; doubles as the inline video player.
+**Key Class:** `LibraryPreviewPane(QWidget)` — `QStackedWidget` with two pages: (a) cached large thumbnail (QPixmapCache "large:" prefix) + metadata form + full description, (b) `QVideoWidget` + transport bar (play/pause + scrubber + time label) backed by a single `QMediaPlayer` + `QAudioOutput`. Resume seek delayed until `LoadedMedia`. Position persisted via 5s-debounce `QTimer` → `update_history_record_fields(HISTORY_PATH, ...)`. Codec failure swaps the video area for a fallback panel that calls `open_path`. Keyboard shortcuts (J/L=±10s, ←/→=±5s, space/K=toggle) scoped to the player page only.
+**Trigger:** Single-click selection populates thumbnail/metadata; double-click on a row emits `LibraryPanel.play_requested` → preview pane's `play(record)`.
 
 #### 12b. `gui/library_thumbnail_delegate.py` (NEW v1.4.0)
 **Purpose:** Custom table delegate for thumbnail column rendering

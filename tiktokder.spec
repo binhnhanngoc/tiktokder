@@ -93,6 +93,18 @@ if _browsers_root.is_dir():
                 (str(src), str(Path('ms-playwright') / rel_dir))
             )
 
+# PySide6 multimedia — QMediaPlayer / QVideoWidget / QAudioOutput.
+# Plugin DLLs (windowsmediaplugin / ffmpegmediaplugin) are discovered by
+# Qt at runtime — must be explicitly collected for frozen builds, otherwise
+# Library playback works in dev but silently fails in the shipped exe.
+# PySide6 wheel layout differs across versions: newer wheels put plugins
+# under ``PySide6/plugins/`` (no Qt/ prefix), older ones use
+# ``PySide6/Qt/plugins/``. Try both; whichever returns files wins.
+pyside6_multimedia_plugins = (
+    collect_data_files('PySide6', subdir=os.path.join('plugins', 'multimedia'))
+    or collect_data_files('PySide6', subdir=os.path.join('Qt', 'plugins', 'multimedia'))
+)
+
 # ---------------------------------------------------------------------------
 # GUI entry point (app.py) — no console window
 # ---------------------------------------------------------------------------
@@ -107,6 +119,7 @@ a = Analysis(
         + qdarktheme_datas
         + playwright_datas
         + playwright_browser_datas
+        + pyside6_multimedia_plugins
         + [('assets/icon.ico', 'assets'), ('assets/icon.png', 'assets')]
     ),
     hiddenimports=[
@@ -119,6 +132,8 @@ a = Analysis(
         'PySide6.QtGui',
         'PySide6.QtWidgets',
         'PySide6.QtSvg',
+        'PySide6.QtMultimedia',
+        'PySide6.QtMultimediaWidgets',
         'curl_cffi',
         'curl_cffi.requests',
     ],

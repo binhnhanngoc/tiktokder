@@ -564,6 +564,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # type: ignore[override]
         """Stop the health timer and drain in-flight workers before teardown.
 
+        Also flushes the in-app player's position so resume-on-next-launch
+        doesn't drift by up to one debounce window when the user closes
+        the app mid-playback.
+
         Without this, a worker emitting ``done`` after Qt has begun deleting
         child widgets can land on a dangling slot and crash on Windows.
         """
@@ -571,6 +575,15 @@ class MainWindow(QMainWindow):
             self._health_timer.stop()
         except Exception:
             pass
+        # Flush both library players' positions before teardown.
+        for tab in (self.tiktok_tab, self.facebook_tab):
+            panel = getattr(tab, "library_panel", None)
+            preview = getattr(panel, "preview_pane", None)
+            if preview is not None and hasattr(preview, "stop_and_show_thumb"):
+                try:
+                    preview.stop_and_show_thumb()
+                except Exception:
+                    pass
         try:
             QThreadPool.globalInstance().waitForDone(2000)
         except Exception:
