@@ -9,7 +9,7 @@ TikTokDer follows [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 
 The single source of truth is `version.py` (`__version__`). The README badge line and the latest changelog entry below must match it on every release. See `docs/release-process.md` for the bump checklist.
 
-## [Unreleased] — In-app player
+## [1.6.0] — 2026-05-02 — In-app player
 
 ### Added
 - **Inline Library playback** — double-clicking a Library row plays the video inside the right-side preview pane via `QStackedWidget` (thumbnail ↔ player). Replaces the previous "Open in OS player" bounce. Transport bar (play/pause + scrubber + time label), letterbox aspect ratio, audio-only files keep the thumbnail visible.
