@@ -22,14 +22,14 @@ def qapp():
 
 
 def test_settings_panel_has_three_groupboxes(qapp, tmp_path, monkeypatch) -> None:
-    """Layout should expose Global / TikTok / Facebook QGroupBoxes."""
+    """Layout should expose Health / Global / TikTok / Facebook QGroupBoxes."""
     monkeypatch.setattr("config.CONFIG_PATH", tmp_path / "config.json")
 
     from gui.settings_panel import SettingsPanel
 
     panel = SettingsPanel(AppConfig())
     titles = sorted(g.title() for g in panel.findChildren(QGroupBox))
-    assert titles == ["Facebook", "Global", "TikTok"]
+    assert titles == ["Facebook", "Global", "Health", "TikTok"]
 
 
 def test_settings_panel_save_emits_settings_changed(qapp, tmp_path, monkeypatch) -> None:

@@ -10,8 +10,8 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Slot
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
@@ -39,9 +39,41 @@ from gui.platform_tab import PlatformTab
 from gui.settings_panel import SettingsPanel
 from gui.status_bar_widget import StatusBarWidget
 from gui.tiktok_browser_panel import TikTokBrowserPanel
+from health_check import (
+    HealthIssue,
+    HealthReport,
+    compute_health,
+    default_cache_path,
+    dismiss_issue,
+)
 from saved_channels_store import load_saved_channels, resolve_page_hint
 from url_parser import detect_platform
 from version import __version__
+
+_HEALTH_TIMER_MS = 30 * 60 * 1000  # 30-minute periodic recompute
+
+
+class _HealthWorkerSignals(QObject):
+    """Cross-thread bridge for the health-compute worker."""
+
+    done = Signal(object)  # HealthReport
+
+
+class _HealthWorker(QRunnable):
+    """One-shot QRunnable wrapping ``compute_health`` for the global thread pool."""
+
+    def __init__(self, callable_) -> None:
+        super().__init__()
+        self._callable = callable_
+        self.signals = _HealthWorkerSignals()
+
+    def run(self) -> None:  # type: ignore[override]
+        try:
+            report = self._callable()
+        except Exception:
+            # Never crash the worker — UI thread continues with last known state.
+            return
+        self.signals.done.emit(report)
 
 
 def _resolve_icon() -> QIcon:
@@ -145,8 +177,19 @@ class MainWindow(QMainWindow):
         self.status_widget = StatusBarWidget()
         self.statusBar().addPermanentWidget(self.status_widget, stretch=1)
 
+        # Health refresh: 30-min QTimer + post-fetch trigger. Compute runs in
+        # the global QThreadPool so the network branch (yt-dlp PyPI) never
+        # blocks the UI thread.
+        self._health_timer = QTimer(self)
+        self._health_timer.setInterval(_HEALTH_TIMER_MS)
+        self._health_timer.timeout.connect(self._refresh_health)
+
         self._connect_signals()
         self._restore_state(self._initial_state)
+
+        self._health_timer.start()
+        # Kick off the first compute — non-network, fast — right after init.
+        QTimer.singleShot(0, self._refresh_health)
 
     # ── signal wiring ─────────────────────────────────────────────────────
 
@@ -185,9 +228,10 @@ class MainWindow(QMainWindow):
             lib.redownload_requested.connect(self._on_history_redownload)
             lib.remove_history_requested.connect(self._on_history_remove)
 
-        # Engine history → both library panels refresh.
+        # Engine history → both library panels refresh + health recompute.
         self.engine.history_changed.connect(self.tiktok_tab.library_panel.refresh)
         self.engine.history_changed.connect(self.facebook_tab.library_panel.refresh)
+        self.engine.history_changed.connect(self._refresh_health)
 
         # Initial population.
         self.tiktok_tab.library_panel.refresh()
@@ -195,6 +239,15 @@ class MainWindow(QMainWindow):
 
         # Settings → engine + panels (live propagation).
         self.settings_panel.settings_changed.connect(self._apply_settings)
+
+        # Health pill click → action dispatcher.
+        self.status_widget.health_action_requested.connect(self._handle_health_action)
+        # Settings Health rows: fix/dismiss/manual-refresh.
+        self.settings_panel.fix_action_requested.connect(self._handle_health_action)
+        self.settings_panel.dismiss_action_requested.connect(self._on_dismiss_health_issue)
+        self.settings_panel.manual_refresh_requested.connect(
+            lambda: self._refresh_health(check_yt_dlp=True)
+        )
 
     # ── per-platform routing ──────────────────────────────────────────────
 
@@ -339,6 +392,60 @@ class MainWindow(QMainWindow):
             text,
         )
 
+    # ── health ────────────────────────────────────────────────────────────
+
+    @Slot()
+    def _refresh_health(self, *, check_yt_dlp: bool = False) -> None:
+        """Spawn a worker that runs ``compute_health`` off the UI thread."""
+        config = self.config
+        store = self._saved_store
+        # Snapshot history off the UI thread inside the worker (cheap I/O,
+        # but keeps the closure self-contained).
+        def work() -> HealthReport:
+            records = load_history_records()
+            return compute_health(store, records, config, check_yt_dlp=check_yt_dlp)
+
+        worker = _HealthWorker(work)
+        worker.signals.done.connect(self._on_health_ready)
+        QThreadPool.globalInstance().start(worker)
+
+    @Slot(object)
+    def _on_health_ready(self, report: HealthReport) -> None:
+        """Route a fresh HealthReport into the pill + Settings section."""
+        self.status_widget.set_health_report(report)
+        if hasattr(self.settings_panel, "set_health_report"):
+            self.settings_panel.set_health_report(report)
+
+    @Slot(object)
+    def _handle_health_action(self, issue: HealthIssue) -> None:
+        """Dispatch a fix-action requested from the pill popover or Settings row."""
+        kind = issue.fix_action_kind
+        arg = issue.fix_action_arg or ""
+        if kind == "open_path" and arg:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(arg))
+        elif kind == "open_url" and arg.startswith("https://"):
+            QDesktopServices.openUrl(QUrl(arg))
+        elif kind == "refresh_channel" and arg:
+            self._refresh_saved_channel(arg)
+        # "none" / unknown → no-op
+
+    def _refresh_saved_channel(self, channel_url: str) -> None:
+        """Find the saved channel in either platform tab and trigger its refresh."""
+        for tab in (self.tiktok_tab, self.facebook_tab):
+            panel = tab.channels_panel
+            channel = panel.store.find_by_url(panel.platform, channel_url)
+            if channel is not None:
+                tab.set_active_sub_tab(0)  # Channels sub-tab
+                self.tabs.setCurrentWidget(tab)
+                panel._refresh_channel(channel)
+                return
+
+    @Slot(str)
+    def _on_dismiss_health_issue(self, issue_id: str) -> None:
+        """Persist a dismissal then re-render so the row disappears immediately."""
+        dismiss_issue(default_cache_path(), issue_id)
+        self._refresh_health()
+
     # ── settings propagation ──────────────────────────────────────────────
 
     @Slot()
@@ -453,6 +560,22 @@ class MainWindow(QMainWindow):
 
         if 0 <= state.active_tab_index < self.tabs.count():
             self.tabs.setCurrentIndex(state.active_tab_index)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        """Stop the health timer and drain in-flight workers before teardown.
+
+        Without this, a worker emitting ``done`` after Qt has begun deleting
+        child widgets can land on a dangling slot and crash on Windows.
+        """
+        try:
+            self._health_timer.stop()
+        except Exception:
+            pass
+        try:
+            QThreadPool.globalInstance().waitForDone(2000)
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def snapshot_state(self) -> AppState:
         # Combine per-platform queues into one snapshot list.

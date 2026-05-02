@@ -4,7 +4,7 @@ Auto-saves on every field change. `settings_changed` is emitted after each
 save so MainWindow can live-propagate to the engine and browser panels.
 """
 
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -12,17 +12,22 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from config import AppConfig, save_config
-from gui import theme
+from gui import theme, tokens
+from health_check import HealthIssue, HealthReport
 
 _THEME_MODE_LABELS = (("System", "system"), ("Light", "light"), ("Dark", "dark"))
 
@@ -40,6 +45,9 @@ class SettingsPanel(QWidget):
     """Settings form split into three QGroupBox sections, auto-saves on change."""
 
     settings_changed = Signal()
+    fix_action_requested = Signal(object)        # HealthIssue
+    dismiss_action_requested = Signal(str)       # issue_id
+    manual_refresh_requested = Signal()          # "Refresh now" pressed
 
     def __init__(self, config: AppConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -47,6 +55,7 @@ class SettingsPanel(QWidget):
 
         outer = QVBoxLayout(self)
 
+        outer.addWidget(self._build_health_group())
         outer.addWidget(self._build_global_group(config))
         outer.addWidget(self._build_tiktok_group(config))
         outer.addWidget(self._build_facebook_group(config))
@@ -195,6 +204,73 @@ class SettingsPanel(QWidget):
 
         return group
 
+    # ── health group ──────────────────────────────────────────────────────
+
+    def _build_health_group(self) -> QGroupBox:
+        """Health section — issues list + Refresh now button. Empty when healthy."""
+        group = QGroupBox("Health")
+        group.setMaximumHeight(260)
+        outer = QVBoxLayout(group)
+        outer.setSpacing(6)
+
+        header = QHBoxLayout()
+        header.addStretch()
+        self.refresh_health_btn = QPushButton("Refresh now")
+        self.refresh_health_btn.setToolTip(
+            "Recompute health, including the yt-dlp version check (single PyPI fetch)."
+        )
+        self.refresh_health_btn.clicked.connect(self.manual_refresh_requested.emit)
+        header.addWidget(self.refresh_health_btn)
+        outer.addLayout(header)
+
+        # Scroll area wraps the issue list.
+        self.health_list_host = QWidget()
+        self.health_list_layout = QVBoxLayout(self.health_list_host)
+        self.health_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.health_list_layout.setSpacing(4)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(self.health_list_host)
+        outer.addWidget(scroll, stretch=1)
+
+        self.health_empty_label = QLabel("All good — no issues detected.")
+        self.health_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.health_list_layout.addWidget(self.health_empty_label)
+        self.health_list_layout.addStretch()
+
+        return group
+
+    def set_health_report(self, report: HealthReport) -> None:
+        """Clear-and-rebuild the issues list from a fresh report."""
+        # Drop existing rows (keep the empty label + stretch indices stable).
+        while self.health_list_layout.count():
+            item = self.health_list_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        if not report.issues:
+            self.health_empty_label = QLabel("All good — no issues detected.")
+            self.health_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.health_list_layout.addWidget(self.health_empty_label)
+            self.health_list_layout.addStretch()
+            return
+
+        from health_check import SEVERITY_RANK
+
+        ordered = sorted(
+            report.issues,
+            key=lambda i: -SEVERITY_RANK.get(i.severity, 0),
+        )
+        for issue in ordered:
+            row = _HealthRow(issue)
+            row.fix_clicked.connect(self.fix_action_requested.emit)
+            row.dismiss_clicked.connect(self.dismiss_action_requested.emit)
+            self.health_list_layout.addWidget(row)
+        self.health_list_layout.addStretch()
+
     # ── helpers ───────────────────────────────────────────────────────────
 
     def _select_quality(self, value: str) -> None:
@@ -278,3 +354,72 @@ class SettingsPanel(QWidget):
                 save_config(self.config)
                 self.settings_changed.emit()
                 return
+
+
+# Action-kind → button copy. Empty label = no action button rendered.
+_ACTION_LABELS = {
+    "open_path": "Open file",
+    "open_url": "Open releases",
+    "refresh_channel": "Refresh now",
+    "none": "",
+}
+
+
+class _HealthRow(QWidget):
+    """One issue row: severity dot · title · detail · action btn · dismiss btn."""
+
+    fix_clicked = Signal(object)       # HealthIssue
+    dismiss_clicked = Signal(str)      # issue_id
+
+    def __init__(self, issue: HealthIssue, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._issue = issue
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(8)
+
+        dot = QLabel()
+        dot.setFixedSize(12, 12)
+        dot.setStyleSheet(
+            f"QLabel {{ background: {_severity_color(issue.severity)}; "
+            f"border-radius: 6px; }}"
+        )
+        layout.addWidget(dot)
+
+        title = QLabel(issue.title)
+        title.setStyleSheet("font-weight: 600;")
+        layout.addWidget(title)
+
+        if issue.detail:
+            detail = QLabel(issue.detail)
+            detail.setStyleSheet(f"color: {tokens.token('text.muted')};")
+            detail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            detail.setToolTip(issue.detail)
+            layout.addWidget(detail, stretch=1)
+        else:
+            layout.addStretch()
+
+        action_label = _ACTION_LABELS.get(issue.fix_action_kind, "")
+        if action_label:
+            self.fix_btn = QPushButton(action_label)
+            self.fix_btn.clicked.connect(
+                lambda _checked=False: self.fix_clicked.emit(self._issue)
+            )
+            layout.addWidget(self.fix_btn)
+
+        self.dismiss_btn = QPushButton("×")
+        self.dismiss_btn.setFixedWidth(24)
+        self.dismiss_btn.setToolTip("Dismiss this issue.")
+        self.dismiss_btn.clicked.connect(
+            lambda _checked=False: self.dismiss_clicked.emit(self._issue.id)
+        )
+        layout.addWidget(self.dismiss_btn)
+
+
+def _severity_color(severity: str) -> str:
+    """Map severity to a theme-aware token color (mirrors StatusBarWidget)."""
+    if severity == "error":
+        return tokens.token("state.error")
+    if severity == "info":
+        return tokens.token("state.info")
+    return tokens.token("state.warning")

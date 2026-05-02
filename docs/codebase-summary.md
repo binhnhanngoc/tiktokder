@@ -20,6 +20,14 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 - Enhanced `channel_fetcher.py` — Now supports Netscape `cookies.txt` via `yt_dlp_helpers.apply_cookies()` (parity with Facebook)
 - New `yt_dlp_helpers.py` — `apply_cookies(ydl_opts, browser, file_path)` mutator; file precedence over browser; used by both TikTok and Facebook
 
+### Health View additions (post-v1.4.0)
+- `health_check.py` — pure-data API: `HealthIssue` / `HealthReport` dataclasses, `compute_health` orchestrator, atomic cache I/O (`data/health_cache.json` schema v1), `record_fetch_outcome`, `dismiss_issue`, `default_cache_path`, CLI smoke entry. Zero Qt imports. Cache writes serialized via `threading.Lock`.
+- `health_signals.py` — 6 internal `_check_*` functions (stale, auth-wall, no-new-downloads, login-required, cookies-age, yt-dlp-outdated) + helpers (`_extract_handle` path-only, `_pypi_calver_to_date`, `_fetch_pypi_version` urllib HTTPS+5s timeout).
+- `gui/status_bar_widget.py` — adds clickable health pill (leftmost, theme-aware) + `QMenu` popover capped at 20 issues; emits `health_action_requested(HealthIssue)`.
+- `gui/settings_panel.py` — adds "Health" QGroupBox at top with `_HealthRow` widgets (severity dot + title + detail + fix btn + dismiss btn) + "Refresh now" button; emits `fix_action_requested` / `dismiss_action_requested` / `manual_refresh_requested`.
+- `gui/main_window.py` — 30-min `QTimer` + post-fetch trigger drive a `QThreadPool` `_HealthWorker`; `_handle_health_action` dispatches `open_path` / `open_url` (HTTPS-only) / `refresh_channel`; `closeEvent` drains the pool to prevent shutdown crashes.
+- 34 tests across `test_health_check.py` + `test_health_widgets.py` (87% / 85% module coverage).
+
 ### v1.3.0 additions (platform-first UI restructure)
 - `saved_channels_store.py` — schema-v1 saved-channels persistence (`data/saved_channels.json`); CRUD, atomic write, tolerant load, cap-200/platform with FIFO trim, `select_new_videos` filter for "Download all new". 19 tests.
 - `gui/platform_tab.py` — composite per-platform widget hosting Channels / Queue / Library sub-tabs; drag-drop filtered to own platform.
