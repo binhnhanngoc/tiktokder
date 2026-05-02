@@ -3,9 +3,9 @@
 ## Project Definition
 
 **Name:** TikTok & Facebook Batch Video Downloader
-**Version:** 1.3.0
-**Status:** Stable (Platform-first UI restructure with persistent state and saved channels)
-**Last Updated:** 2026-04-26
+**Version:** 1.4.0
+**Status:** Stable (Library 3-pane with thumbnails, SemVer infra, TikTok cookies parity)
+**Last Updated:** 2026-05-02
 
 ## Executive Summary
 
@@ -23,6 +23,9 @@ Dual-interface Python application for batch-downloading TikTok and Facebook vide
 8. **Watermark Removal** — yt-dlp extraction for clean, high-quality output
 9. **Real-time Progress** — GUI table updates and CLI progress bar with percentages
 10. **Settings Persistence** — Configuration saved to ~/.tiktokder/config.json (output dir, workers, delay)
+11. **Library Preview Pane** — 3-pane layout with large thumbnail, metadata, and description; sortable/filterable history; advanced search across title/uploader/URL/description (v1.4.0)
+12. **TikTok Cookies Parity** — Netscape `cookies.txt` support for both TikTok and Facebook, lifts anonymous rate limits (v1.4.0)
+13. **SemVer Infrastructure** — Automated version management via `version.py` SSOT; reflected in GUI title, CLI `--version`, and build artifacts (v1.4.0)
 
 ## Technical Stack
 
@@ -56,13 +59,15 @@ Dual-interface Python application for batch-downloading TikTok and Facebook vide
 - **`path_builder.py`** — platform/uploader-aware path building + slug normalization
 - **`retry_policy.py`** — Tenacity decorators + typed exceptions (LoginRequired, RateLimited, etc.)
 
-### GUI Package (`gui/`) — v1.3.0 Restructure
+### GUI Package (`gui/`) — v1.4.0 Library Preview Pane
 - **`main_window.py`** — Main window with global URL bar + QTabWidget (TikTok / Facebook / Settings)
 - **`global_url_bar.py`** — Persistent URL input above tabs; drag-drop `.txt` files and URLs
 - **`platform_tab.py`** — Per-platform composite widget with 3 sub-tabs (Channels / Queue / Library)
 - **`saved_channels_panel.py`** — Saved channels list with browser embedded; "Download all new" feature
-- **`library_panel.py`** — Two-pane uploader sidebar + filtered history table; per-platform scoped
-- **`download_table.py`** — Queue sub-tab table; real-time status/progress/size columns
+- **`library_panel.py`** — 3-pane layout: uploader sidebar + sortable/filterable history table + preview pane (v1.4.0); advanced filter row (quality/date/size/status); search debounce across title/uploader/URL/description
+- **`library_preview_pane.py`** — Right-pane preview widget (NEW v1.4.0): cached large thumbnail + metadata form + description QTextEdit
+- **`library_thumbnail_delegate.py`** — Table cell renderer for thumbnail column (NEW v1.4.0)
+- **`download_table.py`** — Queue sub-tab table; real-time status/progress/size columns; token-aware QSS progress bars
 - **`base_browser_panel.py`** — Shared base for TikTok/Facebook browser panels
 - **`tiktok_browser_panel.py`** — TikTok channel browser via ChannelFetcher
 - **`facebook_browser_panel.py`** — Facebook page browser via FacebookFetcher; Scrolls spinbox + "Load more"
@@ -73,6 +78,7 @@ Dual-interface Python application for batch-downloading TikTok and Facebook vide
 - **`tokens.py`** — 15 semantic color keys (headless-testable)
 - **`spacing.py`** — 8pt grid spacing constants (XS–XXXL)
 - **`icons.py`** — qtawesome icon memo cache
+- **`progress_styles.py`** — Per-row QProgressBar stylesheet builder, token-aware QSS (NEW v1.4.0)
 
 ### Data Flow (GUI)
 ```
@@ -179,18 +185,30 @@ Options:
 - **Rate limits:** TikTok may throttle requests; `--delay` mitigates this
 - **Storage:** Videos stored locally; no cloud integration
 
+## Semver Release Infrastructure (v1.4.0)
+
+- **SSOT:** `version.py` contains `__version__ = "1.4.0"` constant
+- **Propagation:** Imported by `app.py` (GUI title + About dialog), `main.py` (CLI `--version` flag), `build.py` (PyInstaller spec)
+- **Versioning:** Follow semantic versioning (Major.Minor.Patch)
+- **Details:** See `docs/release-process.md` for version bump procedures
+
+## Facebook Folder Structure (v1.4.0)
+
+Output tree now uses Facebook **page slug** (URL-safe name) instead of display name:
+```
+downloads/facebook/{pagename}/{video_id}_{title}.{ext}
+```
+Example: `downloads/facebook/bbc-news/12345678_breaking.mp4` (not `downloads/facebook/BBC News/...`)
+
 ## Future Enhancements
 
 - Resume interrupted batch downloads
 - Video metadata export (duration, likes, views, upload date)
-- Filter videos by date range, engagement, or caption keywords
 - Database for persistent download history and statistics
 - Scheduled/recurring batch downloads
 - Webhook notifications on completion
-- Standalone executable (PyInstaller packaging)
-- Dark/light theme support
+- Standalone executable (PyInstaller packaging — via `build.py`)
 - Advanced search and filtering in channel/page browser
-- Download queue save/restore on app restart
 - Support for additional platforms (Instagram, YouTube, Twitter)
 
 ## Testing & Quality Assurance

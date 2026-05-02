@@ -1,4 +1,4 @@
-# GUI Usage Guide (v1.3.0)
+# GUI Usage Guide (v1.4.0)
 
 ## Launching the GUI
 
@@ -93,17 +93,29 @@ Per-platform download queue with real-time progress.
 
 ### Sub-tab 3: Library
 
-Per-platform download history with uploader sidebar and search.
+Per-platform download history with uploader sidebar, 3-pane layout, and advanced filtering.
 
-**Two-Pane Layout:**
+**Three-Pane Layout (v1.4.0):**
 - **Left pane:** Uploader sidebar
   - List of uploaders (TikTok creators or Facebook pages) sorted by frequency
   - ★ indicator for uploaders with saved channels
-  - Click to filter right pane to that uploader
-- **Right pane:** History table
-  - Title, Quality, Size, Date (download timestamp), File path
-  - Search box (200ms debounce) filters by title or uploader
-  - Stats label (total videos, total size, date range)
+  - Click to filter right panes to that uploader
+- **Middle pane:** Sortable/filterable history table
+  - Columns: Thumbnail, Title, Quality, Size, Date (download timestamp), Status
+  - **Sortable headers:** Click column header to sort (Size sorts numerically, Date sorts chronologically, default: Date descending)
+  - Thumbnail column displays cached preview image (sidecar `.jpg`/`.webp`)
+- **Right pane:** Preview panel (NEW v1.4.0)
+  - Large thumbnail (cached via QPixmapCache)
+  - Metadata form: Date, Size, Uploader, Quality, Views, Platform
+  - Full description in scrollable QTextEdit
+
+**Filter Row (v1.4.0):**
+- **Search box** (200ms debounce) — Matches Title, Uploader, URL, or Description text
+- **Quality dropdown** — Filter by Best / 1080p / 720p / 480p / Audio only
+- **Date range pickers** — From/To toggleable date filters
+- **Size threshold** — Show videos ≥ N MB
+- **Status dropdown** — Available (file exists) or Missing (file deleted)
+- All filters combined (AND logic)
 
 **Right-click Actions:**
 - **Open file** → Launch video in default player
@@ -112,9 +124,9 @@ Per-platform download history with uploader sidebar and search.
 - **Copy URL** → Clipboard copy
 - **Remove** → Delete from history (file untouched)
 
-**Filtering:**
-- By uploader (click sidebar)
-- By search term (case-insensitive)
+**Selection & Stats:**
+- Single-click row → preview pane updates
+- Stats label (total videos, total size, date range) updates per filter
 - Platform-scoped (TikTok tab shows TikTok videos, Facebook tab shows Facebook videos)
 
 ## Settings Tab
@@ -130,19 +142,20 @@ Configure application behavior. Changes apply immediately.
 | **Delay (seconds)** | 0.0–10.0 | 1.0 | Gaussian jitter per platform (TT: 1.5s mean, FB: 3.0s mean) |
 | **Default Quality** | Best / 1080p / 720p / 480p / Audio only | Best | Audio-only requires ffmpeg; writes `.m4a` |
 | **Write Subtitles** | on / off | off | Downloads `.srt` sidecar (English) |
-| **Write Thumbnail** | on / off | off | Downloads `.jpg` sidecar |
 
 ### TikTok Section
 | Setting | Options | Notes |
 |---------|---------|-------|
 | **Cookie Browser** | None / Chrome / Firefox / Edge | Auto-extracts session from your browser |
-| **Cookies File** | path to `cookies.txt` | Netscape format; **overrides Cookie Browser** when set. Lifts anonymous rate limits on profile scrapes/downloads. Export with *Get cookies.txt LOCALLY* extension |
+| **Cookies File** | path to Netscape `cookies.txt` | **Overrides Cookie Browser** when set. Lifts anonymous rate limits on profile scrapes/downloads (parity with Facebook). Export via *Get cookies.txt LOCALLY* extension while logged in |
 
 ### Facebook Section
 | Setting | Options | Notes |
 |---------|---------|-------|
 | **Cookies File** | path to `cookies.txt` | Netscape format; lifts 10-reel anonymous cap. Export with *Get cookies.txt LOCALLY* extension |
 | **Default Max Scrolls** | 1–50 | Scroll budget for Channels browser (Facebook tab) |
+
+_Note: Thumbnails are always written as sidecar `.jpg`/`.webp` next to each video so the Library can show previews. The toggle was removed in v1.4.0._
 
 **Tip:** All settings auto-save and sync between GUI and CLI via `~/.tiktokder/config.json`.
 

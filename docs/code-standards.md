@@ -15,9 +15,11 @@ tiktokder/
 ├── facebook_fetcher.py         # Playwright Facebook scraper; cookies.txt injection
 ├── facebook_resolver.py        # fb.watch pre-resolver (curl_cffi)
 ├── retry_policy.py             # Tenacity + typed exceptions
-├── history_store.py            # HistoryRecord persistence; v1→v2 migration
+├── history_store.py            # HistoryRecord persistence; v1→v3 migration (v1.4.0: description + thumbnail_path)
 ├── path_builder.py             # Slugify + outtmpl builders
 ├── saved_channels_store.py     # SavedChannel CRUD + "Download all new" (v1.3)
+├── version.py                  # __version__ SSOT (v1.4.0)
+├── yt_dlp_helpers.py           # apply_cookies() mutator for file-precedence cookie wiring (v1.4.0)
 ├── gui/
 │   ├── __init__.py
 │   ├── main_window.py          # MainWindow + QTabWidget orchestration
@@ -29,6 +31,9 @@ tiktokder/
 │   ├── base_browser_panel.py   # Shared TikTok/Facebook browser base
 │   ├── tiktok_browser_panel.py # TikTok browser UI
 │   ├── facebook_browser_panel.py # Facebook browser + Scrolls spinbox
+│   ├── library_preview_pane.py # Preview pane with thumbnail + metadata + description (v1.4.0)
+│   ├── library_thumbnail_delegate.py # Thumbnail column delegate (v1.4.0)
+│   ├── progress_styles.py      # Token-aware QSS for progress bars (v1.4.0)
 │   ├── status_bar_widget.py    # Status badges (v1.3)
 │   ├── settings_panel.py       # Global/TikTok/Facebook settings
 │   ├── _history_helpers.py     # format_size, format_date, open_path (v1.3)
@@ -95,14 +100,14 @@ def validate_tiktok_url(url: str) -> bool:
 - **Classes:**
   - `DownloadResult` — Dataclass: `url, success, video_id, title, error, skipped, file_path`
 - **Functions:**
-  - `get_ydl_opts(output_dir, cookie_browser=None, quality="best", write_subs=False, write_thumb=False, cookies_file=None) -> dict` — Build yt-dlp options (quality preset, impersonate=chrome136, postprocessors). Cookie wiring delegated to `yt_dlp_helpers.apply_cookies()` (file > browser > none).
-  - `download_video(url, output_dir, progress_hook=None, ...) -> DownloadResult` — Single video; pre-resolves FB shortlinks; wraps `_do_download` in tenacity retry
+  - `get_ydl_opts(output_dir, cookie_browser=None, quality="best", write_subs=False, write_thumb=True, cookies_file=None) -> dict` — Build yt-dlp options (quality preset, impersonate=chrome136, postprocessors). **v1.4.0: `write_thumb=True` always** (toggle removed). Cookie wiring delegated to `yt_dlp_helpers.apply_cookies()` (file > browser > none).
+  - `download_video(url, output_dir, progress_hook=None, cookies_file=None, ...) -> DownloadResult` — Single video; pre-resolves FB shortlinks; wraps `_do_download` in tenacity retry
   - `download_batch(urls, output_dir, workers=3, delay=1.0, progress_callback=None, ...) -> list[DownloadResult]` — Concurrent CLI batch (platform-aware pacing)
 
-### `yt_dlp_helpers.py`
+### `yt_dlp_helpers.py` (v1.4.0)
 - **Purpose:** Shared yt-dlp option mutators kept out of `downloader.py`
 - **Functions:**
-  - `apply_cookies(ydl_opts, browser, file_path) -> None` — Mutate `ydl_opts` to add cookie source. Existing cookie file wins over browser DB; missing/empty file falls through to browser; neither set → no mutation.
+  - `apply_cookies(ydl_opts, browser, file_path) -> None` — Mutate `ydl_opts` to add cookie source. File precedence over browser; missing/empty file falls through to browser; neither set → no mutation. Used by both TikTok and Facebook (parity in v1.4.0).
 
 ### `download_engine.py`
 - **Purpose:** Qt download orchestration for GUI (queue, dedup, history, retries)
@@ -117,10 +122,10 @@ def validate_tiktok_url(url: str) -> bool:
   - `retry_url(url, force=False)` / `retry_urls(urls, force=False)` — Drop from dedup, re-queue
   - `apply_runtime_settings(...)` — Live-propagate Settings panel changes
 
-### `channel_fetcher.py`
+### `channel_fetcher.py` (v1.4.0 + cookies.txt)
 - **Purpose:** TikTok channel video listing via yt-dlp flat-playlist (QThread)
 - **Classes:**
-  - `ChannelFetcher(QThread)` — Emits `video_found(VideoInfo)`, `error(str)`, `finished()`; supports `cancel()`
+  - `ChannelFetcher(QThread)` — Emits `video_found(VideoInfo)`, `error(str)`, `finished()`; supports `cancel()`. **v1.4.0: accepts `cookies_file` parameter** for Netscape cookies.txt support (parity with Facebook)
 
 ### `facebook_fetcher.py`
 - **Purpose:** Facebook page/profile scraping via Playwright headless Chromium (QThread)
@@ -154,6 +159,13 @@ def validate_tiktok_url(url: str) -> bool:
 - **Purpose:** Per-platform composite widget with 3 sub-tabs
 - **Classes:**
   - `PlatformTab(platform, browser_panel, store, store_path)` — QTabWidget with Channels / Queue / Library; drag-drop filtered to own platform
+
+### `gui/library_panel.py` (v1.4.0 — 3-pane + advanced filtering)
+- **Purpose:** Per-platform history with 3-pane layout, sortable columns, advanced filters, and preview pane
+- **Classes:**
+  - `LibraryPanel(QWidget)` — **3-pane layout:** left uploader sidebar (frequency-sorted, ★ for saved channels), middle sortable/filterable history table with thumbnail column (Size numeric, Date chronologic, default Date desc), right `LibraryPreviewPane`
+  - **Advanced filter row:** Quality dropdown, Date From/To pickers, Size ≥ MB, Status (Available/Missing), search box (200ms debounce, matches title/uploader/URL/description)
+  - Right-click: Open file / Open folder / Re-download / Copy URL / Remove. Single-click row triggers preview pane update.
 - **Responsibilities:** Sub-tab selection state, platform-scoped signal routing
 
 ### `gui/saved_channels_panel.py`
@@ -329,6 +341,27 @@ def test_validate_tiktok_url_with_invalid_url():
 | Playwright | 1.40.0+ | Headless browser for Facebook scraping |
 | pytest | 7.0.0+ | Unit testing framework |
 | PyInstaller | 6.0.0+ | Standalone executable packaging |
+
+### `gui/library_preview_pane.py` (v1.4.0)
+- **Purpose:** Right-pane preview widget for Library history
+- **Class:** `LibraryPreviewPane(QWidget)` — Displays cached large thumbnail (QPixmapCache "large:" prefix), metadata form (date/size/uploader/quality/views/platform), full description in scrollable QTextEdit
+- **Integration:** Embedded in `LibraryPanel` 3-pane layout; triggered by single-click on history table row
+
+### `gui/library_thumbnail_delegate.py` (v1.4.0)
+- **Purpose:** Custom QStyledItemDelegate for thumbnail column rendering in Library table
+- **Class:** `ThumbnailDelegate(QStyledItemDelegate)` — Scales cached thumbnail images to row height; integrates with QPixmapCache
+- **Integration:** Injected into Library history table's thumbnail column
+
+### `gui/progress_styles.py` (v1.4.0)
+- **Purpose:** Token-aware QSS stylesheet builder for per-row progress bars
+- **Functions:** `build_progress_stylesheet(tokens: Tokens, mode: str) -> str` — Returns QSS with semantic color tokens for progress bar styling (light/dark modes)
+- **Integration:** Applied to per-row QProgressBar in `download_table.py`; supports live theme switching via `theme.apply(mode)`
+
+### `version.py` (v1.4.0)
+- **Purpose:** Single source of truth for application version (SemVer)
+- **Export:** `__version__ = "1.4.0"` constant
+- **Governance:** Manual bump only; all downstream references auto-update on import. Major/Minor/Patch bumps documented in `release-process.md`
+- **Integration:** Imported by `app.py` (GUI title + About dialog), `main.py` (CLI `--version` flag), `build.py` (PyInstaller spec)
 
 ## Future Standards
 

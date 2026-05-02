@@ -4,12 +4,21 @@
 
 TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloading TikTok and Facebook videos without watermarks. Organized into three layers: user interface (PySide6 GUI, Rich CLI), shared business logic, and external dependencies (yt-dlp, Playwright).
 
-**Current Statistics (v1.3.0):**
-- **Total Python Modules:** ~28 (core + GUI components + new v1.3 modules)
-- **Total LOC:** ~5350 (root: ~2650, GUI: ~2700)
+**Current Statistics (v1.4.0):**
+- **Total Python Modules:** ~32 (core + GUI components + v1.4 library widgets)
+- **Total LOC:** ~5800 (root: ~2750, GUI: ~3050)
 - **Test Coverage:** 326+ tests across 4 test files
 - **Python Version:** 3.10+
 - **External Dependencies:** 8+ (yt-dlp, PySide6, Rich, pytest, PyInstaller, Playwright, tenacity, curl_cffi, qtawesome, pyqtdarktheme, darkdetect)
+
+### v1.4.0 additions (Library 3-pane + SemVer + TikTok cookies parity)
+- `version.py` — `__version__` SSOT constant; imported by app.py, main.py, build.py for consistent versioning across GUI/CLI/packaging
+- `gui/library_preview_pane.py` — Right-pane preview widget with cached large thumbnail (QPixmapCache "large:" prefix), metadata form, full description QTextEdit
+- `gui/library_thumbnail_delegate.py` — Custom table delegate for thumbnail column rendering in Library history table
+- `gui/progress_styles.py` — Token-aware QSS stylesheet builder for per-row QProgressBar styling (live theme switching)
+- Enhanced `gui/library_panel.py` — 3-pane layout (was 2-pane), sortable columns (Size numeric, Date default desc), advanced filter row (Quality/Date/Size/Status dropdowns + 200ms debounce), search across title/uploader/URL/description fields
+- Enhanced `channel_fetcher.py` — Now supports Netscape `cookies.txt` via `yt_dlp_helpers.apply_cookies()` (parity with Facebook)
+- New `yt_dlp_helpers.py` — `apply_cookies(ydl_opts, browser, file_path)` mutator; file precedence over browser; used by both TikTok and Facebook
 
 ### v1.3.0 additions (platform-first UI restructure)
 - `saved_channels_store.py` — schema-v1 saved-channels persistence (`data/saved_channels.json`); CRUD, atomic write, tolerant load, cap-200/platform with FIFO trim, `select_new_videos` filter for "Download all new". 19 tests.
@@ -47,14 +56,14 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 #### 2. `downloader.py`
 **Purpose:** yt-dlp wrapper and concurrent download orchestration
 **Key Exports:**
-- `get_ydl_opts(output_dir, cookie_browser=None, retries=10) -> dict` — Builds yt-dlp configuration with platform-aware retries, `extractor_retries`, `fragment_retries`, `sleep_interval(_requests)`, and per-layer `retry_sleep_functions`
-- `download_video(url, output_dir, progress_hook=None, cookie_browser=None, retries=None, max_attempts=None) -> DownloadResult` — Wraps inner `_do_download` with tenacity outer retry; raises typed exceptions internally, returns `DownloadResult` to callers
+- `get_ydl_opts(output_dir, cookie_browser=None, quality="best", write_subs=False, write_thumb=True, cookies_file=None) -> dict` — Builds yt-dlp configuration; **v1.4.0: `write_thumb=True` always** (toggle removed); delegates cookie wiring to `yt_dlp_helpers.apply_cookies()` (file precedence over browser)
+- `download_video(url, output_dir, progress_hook=None, cookie_browser=None, cookies_file=None, retries=None, max_attempts=None) -> DownloadResult` — Wraps inner `_do_download` with tenacity outer retry; raises typed exceptions internally, returns `DownloadResult` to callers
 - `download_batch(urls, output_dir, workers=3, delay=1.0, skip_ids=None, delay_std=None, delay_floor=None) -> list[DownloadResult]` — Concurrent downloads with gaussian-jittered, per-platform pacing
 - `get_downloaded_ids(output_dir) -> set[str]` — Scans output for already-downloaded video IDs
 - Internal helpers: `_jittered_sleep`, `_classify_error`, `_kind_to_exception`, `_exception_to_kind`, `_friendly_error`, `_do_download`
 
 **Key Classes:**
-- `DownloadResult` (dataclass) — `url`, `success`, `video_id`, `title`, `error`, `skipped`. `error` is now a typed kind string (`"login_required"`, `"rate_limited"`, etc.) for known classes, raw message otherwise.
+- `DownloadResult` (dataclass) — `url`, `success`, `video_id`, `title`, `error`, `skipped`, `file_path`. `error` is a typed kind string (`"login_required"`, `"rate_limited"`, etc.) for known classes, raw message otherwise.
 
 **Test Coverage:** `test_tiktokder.py` (35+ tests)
 
@@ -75,24 +84,26 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 #### 4. `channel_fetcher.py`
 **Purpose:** Retrieve TikTok channel and Facebook page metadata and video lists
 **Key Exports:**
-- `get_channel_videos(channel: str, limit: int = 30) -> list[dict]` — Fetch videos from TikTok channel or Facebook page
+- `get_channel_videos(channel: str, limit: int = 30, cookies_file: str | None = None) -> list[dict]` — Fetch videos from TikTok channel or Facebook page; **v1.4.0: supports Netscape `cookies.txt`** via `yt_dlp_helpers.apply_cookies()` (lifts anonymous rate limits on profile scrapes)
 - `get_channel_metadata(channel: str) -> dict | None` — Get channel/page info (followers, bio, video count)
 
 **Returns:** List of dicts with keys: `video_id`, `title`, `description`, `url`
+
+**Dependencies:** yt-dlp, `yt_dlp_helpers.apply_cookies()` (v1.4.0)
 
 **Test Coverage:** `test_channel_fetcher.py` (15+ tests)
 
 #### 5. `facebook_fetcher.py` (NEW)
 **Purpose:** Playwright-based Facebook page scraping for video discovery
 **Key Exports:**
-- `scrape_facebook_page(page_url: str, limit: int = 50) -> list[dict]` — Extract videos from Facebook page
+- `scrape_facebook_page(page_url: str, limit: int = 50, cookies_file: str | None = None) -> list[dict]` — Extract videos from Facebook page; optional `cookies.txt` (lifts 10-reel anonymous cap)
 - `get_facebook_page_metadata(page_url: str) -> dict | None` — Retrieve page info
 
 **Returns:** List of dicts with: `video_id`, `title`, `url`, `upload_date`
 
-**Dependencies:** Playwright (headless browser automation)
+**Dependencies:** Playwright (headless browser automation), `facebook_cookies.load_netscape_cookies()` (v1.4.0)
 
-**Notes:** Headless browser required; may trigger rate limiting
+**Notes:** Headless browser required; may trigger rate limiting; `cookies.txt` support via `yt_dlp_helpers.apply_cookies()` (v1.4.0)
 
 #### 6. `config.py`
 **Purpose:** Application settings persistence and per-platform resilience presets
@@ -112,7 +123,18 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 
 **Test Coverage:** `test_config.py` (30+ tests)
 
-#### 6a. `retry_policy.py` (NEW)
+#### 6a. `yt_dlp_helpers.py` (NEW v1.4.0)
+**Purpose:** Shared yt-dlp option mutators kept out of `downloader.py`
+**Key Functions:**
+- `apply_cookies(ydl_opts: dict, browser: str | None, file_path: str | None) -> None` — Mutate `ydl_opts` to add cookie source. File precedence over browser; missing/empty file falls through to browser; neither set → no mutation. Used by both TikTok and Facebook (parity in v1.4.0).
+
+#### 6b. `version.py` (NEW v1.4.0)
+**Purpose:** Single source of truth for application version
+**Exports:** `__version__ = "1.4.0"` constant
+**Integration:** Imported by `app.py` (GUI title + About dialog), `main.py` (CLI `--version` flag), `build.py` (PyInstaller spec)
+**Bumping:** Manual edit; all downstream references auto-update on import.
+
+#### 6c. `retry_policy.py` (NEW)
 **Purpose:** Tenacity-based outer retry layer with typed exceptions and Retry-After awareness
 **Key Exports:**
 - Exceptions: `LoginRequired`, `Private`, `NotFound`, `RateLimited(retry_after)`, `TransientFailure`, `PermanentFailure`
@@ -124,7 +146,7 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 
 **Test Coverage:** `test_retry_policy.py` (~17 tests)
 
-#### 6b. `facebook_resolver.py` (NEW)
+#### 6d. `facebook_resolver.py` (NEW)
 **Purpose:** Pre-resolve `fb.watch` shortlinks via curl_cffi to fast-fail login walls
 **Key Exports:**
 - `is_fb_shortlink(url) -> bool` — matches `fb.watch/...`
@@ -189,7 +211,22 @@ A persistent `GlobalUrlBar` sits above the tab widget; a `StatusBarWidget` shows
 **Key Classes:**
 - `PlatformTab(platform, browser_panel, store, store_path)` — three-sub-tab QTabWidget (Channels / Queue / Library); drag-drop filtered to own platform.
 - `SavedChannelsPanel` — saved-channel list above an injected browser panel; right-click for Browse/Refresh, Download all new (confirm dialog >10), Rename + notes, Edit URL, Star/Unstar, Remove.
-- `LibraryPanel` — two-pane uploader sidebar + filtered history table; ★ marks uploaders with saved channels; right-click for Open file / Open folder / Re-download / Copy URL / Remove. **All columns sortable by header click** (Size numeric, default Date desc). **Compact filter row**: Quality dropdown, From/To date pickers (toggleable), Size ≥ MB threshold, Status (Available/Missing via `os.path.exists`). All filters share 200ms debounce with search box.
+- `LibraryPanel` — **3-pane layout (v1.4.0):** left uploader sidebar (frequency-sorted, ★ for saved channels), middle sortable/filterable history table with thumbnail column, right preview pane. ★ marks uploaders with saved channels; right-click for Open file / Open folder / Re-download / Copy URL / Remove. **All columns sortable by header click** (Size numeric, Date chronologic, default Date desc). **Advanced filter row (v1.4.0):** Quality dropdown, From/To date pickers (toggleable), Size ≥ MB threshold, Status (Available/Missing via `os.path.exists`), search box (200ms debounce, matches title/uploader/URL/description). All filters combined (AND logic).
+
+#### 12a. `gui/library_preview_pane.py` (NEW v1.4.0)
+**Purpose:** Right-pane preview widget for Library
+**Key Class:** `LibraryPreviewPane(QWidget)` — cached large thumbnail (QPixmapCache "large:" prefix), metadata form (date/size/uploader/quality/views/platform), full description in QTextEdit.
+**Trigger:** Single-click row in history table.
+
+#### 12b. `gui/library_thumbnail_delegate.py` (NEW v1.4.0)
+**Purpose:** Custom table delegate for thumbnail column rendering
+**Key Class:** `ThumbnailDelegate(QStyledItemDelegate)` — Renders cached sidecar thumbnails in library table cells; scales to row height.
+**Integration:** Injected into Library history table's thumbnail column.
+
+#### 12c. `gui/progress_styles.py` (NEW v1.4.0)
+**Purpose:** Token-aware QSS stylesheet builder for per-row progress bars
+**Key Functions:** `build_progress_stylesheet(tokens: Tokens, mode: str) -> str` — Returns QSS with token colors for progress bar styling.
+**Integration:** Applied to per-row QProgressBar in download_table.py (live theme switching).
 
 #### 13. `gui/settings_panel.py`
 **Purpose:** Application configuration interface

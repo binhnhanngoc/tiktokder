@@ -44,7 +44,7 @@ TikTokDer is a dual-interface (GUI + CLI) application for batch-downloading vide
 
 ### 1. User Interface Layer
 
-#### GUI (PySide6) — v1.3.0 Platform-First Restructure
+#### GUI (PySide6) — v1.4.0 Library 3-Pane + SemVer
 - **Entry Point:** `app.py` → `MainWindow`
 - **Top-level Layout:**
   1. **GlobalUrlBar** (`gui/global_url_bar.py`) — Persistent QLineEdit + Add button above tabs; drag-drop `.txt` and URLs; emits `urls_submitted(list[str])`
@@ -63,10 +63,12 @@ TikTokDer is a dual-interface (GUI + CLI) application for batch-downloading vide
      - Download queue table per platform (URL, Title, Status, Progress %, File path)
      - Toolbar: Clear Completed, Clear All, Retry Failed, Cancel All
      - Right-click: Open file, Reveal, Copy URL, Retry, Force Download, Clear row
-  3. **Library Sub-tab** (`gui/library_panel.py`)
-     - Two-pane: left uploader sidebar (frequency-sorted, ★ for saved channels), right history table
+  3. **Library Sub-tab** (`gui/library_panel.py`) (v1.4.0)
+     - **3-pane layout:** left uploader sidebar (frequency-sorted, ★ for saved channels), middle sortable/filterable history table with thumbnail column, right preview pane
+     - **Middle pane:** Columns (Thumbnail, Title, Quality, Size, Date, Status); **all sortable by header click** (Size numeric, Date chronologic, default Date desc); thumbnail column uses `LibraryThumbnailDelegate`
+     - **Right pane:** `LibraryPreviewPane` (cached large thumbnail, metadata form, description QTextEdit)
+     - **Advanced filter row:** Quality dropdown, Date From/To (toggleable), Size ≥ MB, Status (Available/Missing), search box (200ms debounce, matches title/uploader/URL/description)
      - Right-click: Open file, Reveal folder, Re-download, Copy URL, Remove from history
-     - Search box (200ms debounce), stats label
 
 - **Browser Panels** (`gui/base_browser_panel.py`, `gui/tiktok_browser_panel.py`, `gui/facebook_browser_panel.py`)
   - Embedded in Channels sub-tab above table
@@ -75,7 +77,7 @@ TikTokDer is a dual-interface (GUI + CLI) application for batch-downloading vide
   - Facebook: FacebookFetcher + Scrolls spinbox (1–50, default 10) + "Load more" button
   - State snapshots restored on app relaunch
 
-**GUI Data Flow (v1.3):**
+**GUI Data Flow (v1.4.0):**
 ```
 GlobalUrlBar drag-drop or paste URL / .txt file
     ↓
@@ -170,8 +172,9 @@ build_user_url(username: str) -> str
 
 **Key Functions:**
 ```python
-get_ydl_opts(output_dir: str) -> dict
-download_video(url: str, output_dir: str, progress_hook: Callable | None = None) -> DownloadResult
+get_ydl_opts(output_dir: str, quality="best", write_subs=False, write_thumb=True, cookies_file=None) -> dict
+# v1.4.0: write_thumb=True always; cookie wiring delegated to yt_dlp_helpers.apply_cookies()
+download_video(url: str, output_dir: str, progress_hook: Callable | None = None, cookies_file: str | None = None) -> DownloadResult
 download_batch(urls: list[str], output_dir: str, workers: int = 3, delay: float = 1.0, progress_callback: Callable | None = None) -> list[DownloadResult]
 get_downloaded_ids(output_dir: str) -> set[str]
 ```
@@ -205,16 +208,17 @@ class DownloadEngine:
 - GUI calls callbacks on QThread for thread-safe updates
 - CLI uses simple blocking calls
 
-#### `channel_fetcher.py` — TikTok Channel Metadata Retrieval
+#### `channel_fetcher.py` — TikTok Channel Metadata Retrieval (v1.4.0 + cookies.txt)
 **Responsibilities:**
 - Fetch TikTok channel metadata (followers, bio, video count)
 - Retrieve list of videos from TikTok channel
 - Extract video IDs, titles, descriptions
 - Handle network errors gracefully
+- **v1.4.0:** Support Netscape `cookies.txt` via `yt_dlp_helpers.apply_cookies()` (parity with Facebook)
 
 **Key Functions:**
 ```python
-get_channel_videos(channel: str, limit: int = 30) -> list[dict]
+get_channel_videos(channel: str, limit: int = 30, cookies_file: str | None = None) -> list[dict]
 get_channel_metadata(channel: str) -> dict | None
 ```
 
@@ -237,7 +241,7 @@ get_channel_metadata(channel: str) -> dict | None
 
 **Key Functions:**
 ```python
-scrape_facebook_page(page_url: str, limit: int = 50) -> list[dict]
+scrape_facebook_page(page_url: str, limit: int = 50, cookies_file: str | None = None) -> list[dict]
 get_facebook_page_metadata(page_url: str) -> dict | None
 ```
 
@@ -252,6 +256,8 @@ get_facebook_page_metadata(page_url: str) -> dict | None
 ```
 
 **Threading:** Async Playwright browser (headless, auto-closed)
+
+**Cookies Integration (v1.4.0):** Optional Netscape `cookies.txt` lifts 10-reel anonymous cap; uses `facebook_cookies.load_netscape_cookies()` to convert to Playwright cookie dict
 
 #### `config.py` — Settings Persistence
 **Responsibilities:**
@@ -316,7 +322,9 @@ save_config(config: AppConfig) -> None
 
 #### Local Filesystem
 - **Video Storage:** `./downloads/` (configurable via UI/CLI)
-- **File Naming:** `{video_id}_{title}.mp4` (platform-aware tree: `/tiktok/{uploader}/` or `/facebook/{uploader}/`)
+- **File Naming:** `{video_id}_{title}.mp4` (platform-aware tree: `/tiktok/{uploader}/` or `/facebook/{pagename}/`)
+- **Facebook Folders (v1.4.0):** Uses page **slug** (URL-safe name) instead of display name for folder hierarchy (e.g., `downloads/facebook/bbc-news/` not `downloads/facebook/BBC News/`)
+- **Thumbnails (v1.4.0):** Sidecar `.jpg`/`.webp` always written next to each video; used by Library preview pane
 - **Duplicate Detection:** Filesystem scan + history dedup check
 
 #### Configuration File
@@ -356,11 +364,12 @@ save_config(config: AppConfig) -> None
 }
 ```
 
-#### History Records (schema v2)
+#### History Records (schema v3, v1.4.0)
 - **Location:** `data/history.json`
-- **Owner:** `history_store.py` (v1→v2 migration on first write)
+- **Owner:** `history_store.py` (v1→v3 migration on first write)
 - **FIFO cap:** 10,000 entries; trim oldest metadata (video files untouched)
-- **Fields per record:** platform, uploader, video_id, title, quality, size, downloaded_at, file_path
+- **Fields per record:** platform, uploader, video_id, title, quality, size, downloaded_at, file_path, **description, thumbnail_path** (v1.4.0)
+- **Description & Thumbnail:** Surfaced in Library preview pane; thumbnails cached via QPixmapCache "large:" prefix
 
 #### Saved Channels (v1.3.0)
 - **Location:** `data/saved_channels.json`
