@@ -107,6 +107,10 @@ class AppConfig:
     # One of: "all" | "new" | "downloaded".
     tiktok_browse_downloaded_filter: str = "all"
     facebook_browse_downloaded_filter: str = "all"
+    # ── update checker (Phase 02) ──
+    last_update_check_at: float = 0.0       # epoch seconds, 0 = never
+    skipped_update_version: str = ""        # "1.10.1" if user clicked Skip
+    update_check_enabled: bool = True       # opt-out flag (default ON)
 
 
 @dataclass(frozen=True)

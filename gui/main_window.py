@@ -8,6 +8,7 @@ table only shows its own downloads.
 
 import os
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
@@ -15,6 +16,7 @@ from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
+    QMessageBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -49,6 +51,7 @@ from gui.platform_tab import PlatformTab
 from gui.settings_panel import SettingsPanel
 from gui.status_bar_widget import StatusBarWidget
 from gui.tiktok_browser_panel import TikTokBrowserPanel
+from gui.update_dialog import UpdateAvailableDialog
 from health_check import (
     HealthIssue,
     HealthReport,
@@ -57,8 +60,14 @@ from health_check import (
     dismiss_issue,
 )
 from saved_channels_store import load_saved_channels, resolve_page_hint
+from update_checker import (
+    ReleaseInfo,
+    is_newer,
+    latest_release,
+    should_check_now,
+)
 from url_parser import detect_platform
-from version import __version__
+from version import __version__, __version_info__
 
 _HEALTH_TIMER_MS = 30 * 60 * 1000  # 30-minute periodic recompute
 
@@ -86,6 +95,36 @@ class _HealthWorker(QRunnable):
         self.signals.done.emit(report)
 
 
+class _UpdateWorkerSignals(QObject):
+    """Cross-thread bridge for the update-check worker.
+
+    ``done`` carries ``(ReleaseInfo | None, is_manual: bool)`` so the
+    receiving slot can pick the right surface (silent vs QMessageBox).
+    """
+
+    done = Signal(object, bool)
+
+
+class _UpdateWorker(QRunnable):
+    """One-shot QRunnable wrapping ``update_checker.latest_release``.
+
+    Mirrors ``_HealthWorker``: caught-everything defensive ``run`` so a
+    crashed worker never tears down the global thread pool.
+    """
+
+    def __init__(self, is_manual: bool) -> None:
+        super().__init__()
+        self._is_manual = is_manual
+        self.signals = _UpdateWorkerSignals()
+
+    def run(self) -> None:  # type: ignore[override]
+        try:
+            result = latest_release()
+        except Exception:
+            result = None
+        self.signals.done.emit(result, self._is_manual)
+
+
 def _resolve_icon() -> QIcon:
     """Locate icon.ico in source tree or PyInstaller bundle; empty QIcon if missing."""
     base = getattr(sys, "_MEIPASS", None) or os.path.dirname(
@@ -97,6 +136,10 @@ def _resolve_icon() -> QIcon:
 
 class MainWindow(QMainWindow):
     """TikTokDer main window — TikTok / Facebook / Settings tabs."""
+
+    # Emitted after every update-check completion (success / fail / no-op),
+    # so the About-tab pill can re-render without polling.
+    update_check_finished = Signal()
 
     def __init__(
         self,
@@ -113,6 +156,9 @@ class MainWindow(QMainWindow):
         self._restore_geometry()
         # Help dialog is created lazily on first open so app launch stays cheap.
         self._help_dialog: HelpDialog | None = None
+        # Cached last successful update-check payload (None when never checked
+        # or last check failed). Read by the About-tab pill (phase-05).
+        self._latest_release_cache: ReleaseInfo | None = None
         self._setup_menu()
 
         # Download engine — shared across all platform tabs.
@@ -221,6 +267,9 @@ class MainWindow(QMainWindow):
         self._health_timer.start()
         # Kick off the first compute — non-network, fast — right after init.
         QTimer.singleShot(0, self._refresh_health)
+        # Update probe — delayed 2000ms so the first paint isn't blocked by
+        # a thread-pool spin-up. Honours opt-out and 24h cache gates.
+        QTimer.singleShot(2000, self._maybe_check_updates_background)
 
     # ── signal wiring ─────────────────────────────────────────────────────
 
@@ -563,6 +612,11 @@ class MainWindow(QMainWindow):
             "&Keyboard Shortcuts",
             lambda: self._open_help(TAB_SHORTCUTS),
         )
+        help_menu.addAction(
+            icon("mdi6.update"),
+            "Check for &Updates…",
+            self._on_check_updates_manual,
+        )
         help_menu.addSeparator()
         help_menu.addAction(
             icon("mdi6.information-outline"),
@@ -618,8 +672,100 @@ class MainWindow(QMainWindow):
     def _open_help(self, tab_id: str) -> None:
         """Lazily instantiate HelpDialog and jump to the requested tab."""
         if self._help_dialog is None:
-            self._help_dialog = HelpDialog(self)
+            self._help_dialog = HelpDialog(self, main_window=self)
         self._help_dialog.open_at_tab(tab_id)
+
+    # ── update checker ────────────────────────────────────────────────────
+
+    def _maybe_check_updates_background(self) -> None:
+        """Startup probe gated by opt-out and 24h cache. Silent on every failure."""
+        if not self.config.update_check_enabled:
+            return
+        if not should_check_now(self.config.last_update_check_at):
+            return
+        self._spawn_update_worker(is_manual=False)
+
+    @Slot()
+    def _on_check_updates_manual(self) -> None:
+        """Help → Check for Updates…  Bypasses every gate; user asked explicitly."""
+        self.update_status("Checking for updates…")
+        self._spawn_update_worker(is_manual=True)
+
+    def _spawn_update_worker(self, is_manual: bool) -> None:
+        worker = _UpdateWorker(is_manual)
+        worker.signals.done.connect(self._on_update_check_done)
+        QThreadPool.globalInstance().start(worker)
+
+    @Slot(object, bool)
+    def _on_update_check_done(self, result: ReleaseInfo | None, is_manual: bool) -> None:
+        """Apply a worker's outcome: cache, persist timestamp, surface or stay silent.
+
+        Background path is silent on every miss / failure. Manual path always
+        shows an outcome — newer / up-to-date / failed.
+        """
+        # Always write the timestamp; one failure = 24h cooldown for background.
+        self.config.last_update_check_at = time.time()
+        self._latest_release_cache = result
+        try:
+            save_config(self.config)
+        except OSError:
+            pass
+
+        if result is None:
+            if is_manual:
+                QMessageBox.warning(
+                    self,
+                    "Update Check Failed",
+                    "Could not reach GitHub. Check your internet connection "
+                    "and try again.",
+                )
+            self.update_check_finished.emit()
+            return
+
+        if is_newer(result.version, __version_info__):
+            # Background path: respect Skip-this-version.
+            if not is_manual and result.version_str == self.config.skipped_update_version:
+                self.update_check_finished.emit()
+                return
+            self._show_update_dialog(result)
+        else:
+            if is_manual:
+                QMessageBox.information(
+                    self,
+                    "Up to Date",
+                    f"You're running the latest version (v{__version__}).",
+                )
+
+        self.update_check_finished.emit()
+
+    def _show_update_dialog(self, release: ReleaseInfo) -> None:
+        """Construct + exec UpdateAvailableDialog; persist user choices."""
+        dialog = UpdateAvailableDialog(
+            release=release,
+            current_version_str=__version__,
+            opt_out_currently=not self.config.update_check_enabled,
+            parent=self,
+        )
+        dialog.skip_requested.connect(self._on_skip_version)
+        dialog.exec()
+        # Read final checkbox state and flip config if it changed.
+        new_opt_out = dialog.opt_out_chosen()
+        new_enabled = not new_opt_out
+        if new_enabled != self.config.update_check_enabled:
+            self.config.update_check_enabled = new_enabled
+            try:
+                save_config(self.config)
+            except OSError:
+                pass
+
+    @Slot(str)
+    def _on_skip_version(self, version_str: str) -> None:
+        """Persist the version the user chose to skip."""
+        self.config.skipped_update_version = version_str
+        try:
+            save_config(self.config)
+        except OSError:
+            pass
 
     # ── geometry / state ──────────────────────────────────────────────────
 

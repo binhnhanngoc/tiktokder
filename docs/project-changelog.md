@@ -9,6 +9,24 @@ TikTokDer follows [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 
 The single source of truth is `version.py` (`__version__`). The README badge line and the latest changelog entry below must match it on every release. See `docs/release-process.md` for the bump checklist.
 
+## [1.10.0] — 2026-05-04 — In-app update checker
+
+### Added
+- **GitHub Releases probe on startup** — `update_checker.py` (stdlib only, no Qt) hits `GET /repos/{repo}/releases/latest` and falls back to `/tags?per_page=10` filtered by strict `^v\d+\.\d+\.\d+$` when no Release object exists yet. Returns `ReleaseInfo` or `None`; never raises.
+- **Background check** — `MainWindow` schedules a `QTimer.singleShot(2000ms, …)` probe that runs in the global `QThreadPool`. Honours opt-out (`update_check_enabled`) and a 24-hour cache (`last_update_check_at`); a single failure cools the path off for 24h to keep flaky networks quiet.
+- **Manual `Help → Check for Updates…`** — bypasses every gate; surfaces all three outcomes (newer / up-to-date / network failed) via dialog or `QMessageBox`.
+- **`UpdateAvailableDialog`** (`gui/update_dialog.py`) — modal dialog with rendered Markdown release notes (or placeholder when only a tag exists), opt-out checkbox, and three buttons: Open Release Page, Skip This Version, Remind Me Later. Tag-fallback path shows a placeholder line.
+- **About-tab status pill + Check now button** (`gui/about_panel.py`) — replaces the static About HTML with a live widget; pill states are `Up to date` (green), `vX.Y.Z available` (amber, click opens dialog), `Last checked: …` (grey), `Never checked` (grey). Connected to a new `MainWindow.update_check_finished` signal so the pill refreshes in place after each check.
+- **Three additive `AppConfig` fields** — `last_update_check_at: float = 0.0`, `skipped_update_version: str = ""`, `update_check_enabled: bool = True`. Forward-compatible (old configs load with defaults), backward-compatible (old launches drop unknown keys).
+
+### Changed
+- **`HelpDialog` accepts a `main_window` arg** and a polymorphic tab content type — HTML string *or* widget factory — so the About tab can swap to a live widget while every other tab remains a `QTextBrowser`.
+- **`docs/release-process.md`** — adds a one-time `gh auth login` setup note and a `Publish GitHub Release` section using `gh release create … --generate-notes`.
+
+### Notes
+- 49 new tests covering `update_checker` (26), `update_dialog` (10), `about_panel` (15+), and `main_window` update wiring (11) plus 3 added to `test_config.py`. All 500+ existing tests pass.
+- Stdlib only — no new entries in `requirements.txt`.
+
 ## [1.9.0] — 2026-05-04 — In-app Help dialog
 
 ### Added

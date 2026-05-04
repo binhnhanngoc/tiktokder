@@ -4,11 +4,21 @@ Pure data module — kept separate from `help_dialog.py` so the dialog widget
 stays small. Each constant is a self-contained HTML fragment rendered in a
 ``QTextBrowser``. External ``https://`` anchors are routed to the system
 browser by the dialog.
+
+Tab-content polymorphism: the About entry returns a widget *factory*
+(callable) instead of an HTML string so the dialog can swap in a live
+``AboutPanel`` (with update-status pill). All other tabs stay pure HTML.
 """
 
 from __future__ import annotations
 
+from typing import Callable, Union
+
+from PySide6.QtWidgets import QWidget
+
 from version import __version__
+
+TabContent = Union[str, Callable[[QWidget], QWidget]]
 
 # Stable tab ids — referenced from the menu so wiring survives tab reorders.
 TAB_GETTING_STARTED = "getting-started"
@@ -222,25 +232,25 @@ _SHORTCUTS_HTML = """
 """
 
 
-def _about_html() -> str:
-    return f"""
-<h2>TikTokDer v{__version__}</h2>
-<p>Batch video downloader for TikTok and Facebook.</p>
-<h3>Powered by</h3>
-<ul>
-  <li><a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a> &mdash; extraction</li>
-  <li><a href="https://www.qt.io/qt-for-python">PySide6</a> &mdash; GUI</li>
-  <li><a href="https://playwright.dev/python/">Playwright</a> &mdash; Facebook scrape</li>
-  <li><a href="https://rich.readthedocs.io/">Rich</a> &mdash; CLI progress UI</li>
-</ul>
-<p><b>License:</b> MIT.</p>
-<p><small>No watermarks, no API keys, no telemetry. Use responsibly and
-respect each platform's terms of service.</small></p>
-"""
+def _about_factory(main_window):
+    """Build the live About panel; imported lazily to avoid an import cycle.
+
+    ``main_window`` may be ``None`` in offscreen tests — ``AboutPanel`` falls
+    back to the ``unknown`` pill state and disables the click paths.
+    """
+    from gui.about_panel import AboutPanel
+
+    return AboutPanel(main_window)
 
 
-def help_tabs() -> tuple[tuple[str, str, str], ...]:
-    """Tab definitions in display order: ``(tab_id, label, html)``."""
+def help_tabs() -> tuple[tuple[str, str, TabContent], ...]:
+    """Tab definitions in display order.
+
+    Each entry is ``(tab_id, label, content)`` where ``content`` is either:
+    - an HTML string rendered in a ``QTextBrowser`` (default for static tabs)
+    - a ``Callable[[QWidget|None], QWidget]`` returning a custom widget
+      (used by the About tab to surface a live update-status pill).
+    """
     return (
         (TAB_GETTING_STARTED, "Getting Started", _GETTING_STARTED_HTML),
         (TAB_COOKIES_EXPORT, "Cookies — Export", _COOKIES_EXPORT_HTML),
@@ -248,5 +258,5 @@ def help_tabs() -> tuple[tuple[str, str, str], ...]:
         (TAB_CHANNELS_LIBRARY, "Channels & Library", _CHANNELS_LIBRARY_HTML),
         (TAB_TROUBLESHOOTING, "Troubleshooting", _TROUBLESHOOTING_HTML),
         (TAB_SHORTCUTS, "Shortcuts", _SHORTCUTS_HTML),
-        (TAB_ABOUT, "About", _about_html()),
+        (TAB_ABOUT, "About", _about_factory),
     )

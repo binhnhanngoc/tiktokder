@@ -6,6 +6,14 @@ TikTokDer follows [SemVer](https://semver.org/): MAJOR.MINOR.PATCH (see `docs/pr
 
 `version.py` — `__version__` is the only digit-bearing literal that matters. `__version_info__` is parsed from it at import time.
 
+## One-time Setup
+
+Publishing a GitHub Release requires the `gh` CLI authenticated against the repo. Run once per machine:
+
+```bash
+gh auth login --hostname github.com -s repo,read:org
+```
+
 ## Manual-Bump Locations (3)
 
 On every release, update these together:
@@ -33,6 +41,18 @@ git tag vX.Y.Z
 git push && git push --tags
 ```
 
+## Publish GitHub Release
+
+The in-app update checker (`update_checker.py`) consults the GitHub Releases API; ship a Release object every tag so the primary path lights up (the `/tags` fallback covers historic tags but lacks release notes). Run **after** the tag has been pushed:
+
+```bash
+gh release create vX.Y.Z dist/TikTokDer-portable-X.Y.Z.zip \
+  --title "vX.Y.Z" \
+  --generate-notes
+```
+
+`--generate-notes` builds the release body from PR / commit history since the previous tag — zero authoring overhead.
+
 ## Pre-Tag Checklist
 
 - [ ] `version.py`, `README.md`, changelog all show same `X.Y.Z`
@@ -41,10 +61,10 @@ git push && git push --tags
 - [ ] `python build.py` succeeds; zip filename includes `X.Y.Z`
 - [ ] Smoke-test built GUI: window title, Help → About both show `vX.Y.Z`
 - [ ] Windows EXE Properties → Details shows `X.Y.Z`
+- [ ] After tag push: `gh release create vX.Y.Z dist/TikTokDer-portable-X.Y.Z.zip --title "vX.Y.Z" --generate-notes` (publishes the Release the in-app updater watches)
 
 ## Out of Scope (not automated yet)
 
 - Code-signing the EXEs
-- GitHub Releases auto-upload
 - Pre-release suffixes (`-rc`, `-beta`)
-- Auto-generated release notes from commits
+- Auto-generated release notes from commits beyond `gh --generate-notes`

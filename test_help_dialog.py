@@ -29,24 +29,33 @@ def qapp():
 
 
 def test_help_tabs_definitions_have_unique_ids_and_non_empty_html() -> None:
-    """Every tab needs a stable id, a label, and renderable HTML body."""
+    """Every tab needs a stable id, a label, and renderable content.
+
+    Content is either an HTML string or a widget factory (callable).
+    """
     tabs = help_tabs()
     assert len(tabs) >= 5
-    ids = [tab_id for tab_id, _label, _html in tabs]
+    ids = [tab_id for tab_id, _label, _content in tabs]
     assert len(ids) == len(set(ids)), "tab ids must be unique"
-    for tab_id, label, html in tabs:
+    for tab_id, label, content in tabs:
         assert tab_id, "tab id must be non-empty"
         assert label, f"tab {tab_id!r} missing label"
-        assert "<" in html and ">" in html, f"tab {tab_id!r} missing HTML markup"
-        assert len(html.strip()) > 80, f"tab {tab_id!r} body suspiciously short"
+        if callable(content):
+            continue  # widget-factory tabs are validated by their own tests
+        assert "<" in content and ">" in content, f"tab {tab_id!r} missing HTML markup"
+        assert len(content.strip()) > 80, f"tab {tab_id!r} body suspiciously short"
 
 
 def test_help_dialog_instantiates_with_all_tabs(qapp) -> None:
     dlg = HelpDialog()
     assert dlg.tabs.count() == len(help_tabs())
-    # Each tab is a QTextBrowser (the dialog promises HTML rendering).
+    # HTML tabs render to QTextBrowser; widget-factory tabs (About) yield
+    # a custom widget. Either is valid.
+    from gui.about_panel import AboutPanel
+
     for i in range(dlg.tabs.count()):
-        assert isinstance(dlg.tabs.widget(i), QTextBrowser)
+        widget = dlg.tabs.widget(i)
+        assert isinstance(widget, (QTextBrowser, AboutPanel))
 
 
 @pytest.mark.parametrize(

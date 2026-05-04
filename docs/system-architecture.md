@@ -22,6 +22,7 @@ TikTokDer is a dual-interface (GUI + CLI) application for batch-downloading vide
 │  channel_fetcher.py   (TikTok metadata)                 │
 │  facebook_fetcher.py  (Facebook scraping via Playwright)│
 │  config.py            (settings management)             │
+│  update_checker.py    (GitHub release probe, stdlib)    │
 └─────────────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────┐
@@ -291,6 +292,30 @@ save_config(config: AppConfig) -> None
 - Path: `~/.tiktokder/config.json`
 - Format: JSON with snake_case keys
 - Fallback: Defaults if file missing or corrupted
+
+#### `update_checker.py` — GitHub Release Probe (v1.10.0)
+**Responsibilities:**
+- Stdlib-only (`urllib.request`, `json`, `re`) HTTP fetch of the latest GitHub release for `binhnhanngoc/tiktokder`
+- `/releases/latest` primary; `/tags?per_page=10` fallback when no Release object exists
+- Strict `^v\d+\.\d+\.\d+$` filter — pre-release tags (`-rc`, `-beta`) excluded
+- Pure logic — no Qt, no threads. Public API never raises (all errors → `None`)
+
+**Public API:**
+```python
+@dataclass(frozen=True)
+class ReleaseInfo:
+    version: tuple[int, int, int]
+    version_str: str
+    html_url: str
+    body: str
+    is_tag_fallback: bool
+
+latest_release(timeout: float = 5.0) -> ReleaseInfo | None
+is_newer(latest: tuple[int,int,int], current: tuple[int,int,int]) -> bool
+should_check_now(last_check_ts: float, interval_h: float = 24.0) -> bool
+```
+
+**Wiring:** `MainWindow` spawns `_UpdateWorker` (`QRunnable`) on the global thread pool; results route through `_on_update_check_done(result, is_manual)` which gates background output (silent on every miss) but always surfaces a `QMessageBox` for manual `Help → Check for Updates…`. `gui/update_dialog.py` renders newer-release notes; `gui/about_panel.py` derives a 4-state pill (`unknown` / `stale` / `up_to_date` / `available`) for the About tab.
 
 ### 3. External Dependencies
 

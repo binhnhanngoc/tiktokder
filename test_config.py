@@ -148,6 +148,43 @@ class TestBrowseDownloadedFilter:
         assert loaded.facebook_browse_downloaded_filter == "downloaded"
 
 
+class TestUpdateCheckerFields:
+    """Three additive fields persist across save/load for the update checker."""
+
+    def test_defaults(self):
+        c = AppConfig()
+        assert c.last_update_check_at == 0.0
+        assert c.skipped_update_version == ""
+        assert c.update_check_enabled is True
+
+    def test_save_and_load_roundtrip(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        cfg = AppConfig(
+            last_update_check_at=1714000000.0,
+            skipped_update_version="1.10.1",
+            update_check_enabled=False,
+        )
+        with patch("config.CONFIG_PATH", config_path), patch("config.CONFIG_DIR", tmp_path):
+            save_config(cfg)
+            loaded = load_config()
+        assert loaded.last_update_check_at == 1714000000.0
+        assert loaded.skipped_update_version == "1.10.1"
+        assert loaded.update_check_enabled is False
+
+    def test_legacy_config_without_fields_loads_with_defaults(self, tmp_path):
+        """A pre-1.10.0 config must keep loading with sensible defaults."""
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps({"output_dir": "/x", "workers": 2}),
+            encoding="utf-8",
+        )
+        with patch("config.CONFIG_PATH", config_path):
+            c = load_config()
+        assert c.last_update_check_at == 0.0
+        assert c.skipped_update_version == ""
+        assert c.update_check_enabled is True
+
+
 class TestHistory:
     """Test download history persistence."""
 
