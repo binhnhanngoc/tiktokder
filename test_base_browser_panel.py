@@ -1,8 +1,10 @@
 """Tests for BaseBrowserPanel filter row + sort + hide-aware select.
 
 Covers Phase 1 of the channel-filters plan: search predicate, quality combo,
-date range, hidden-row select-all, hidden-row download-selected, and the
-no-mutation invariant on `_videos`.
+date range, hidden-row select-all, hidden-row download-selected, the
+no-mutation invariant on `_videos`, plus the Downloaded combo + ✓ column +
+live history_changed coalescing wired in the channel-browse-downloaded-filter
+plan.
 """
 
 from __future__ import annotations
@@ -17,7 +19,12 @@ from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QApplication
 
 from channel_fetcher import VideoInfo
-from gui.base_browser_panel import BaseBrowserPanel
+from gui.base_browser_panel import (
+    BaseBrowserPanel,
+    _COL_DATE,
+    _COL_DOWNLOADED,
+    _COL_TITLE,
+)
 
 
 @pytest.fixture(scope="session")
@@ -144,7 +151,7 @@ def test_table_sorting_enabled_default_date_desc(qapp):
     assert panel.table.isSortingEnabled() is True
     # Default sort indicator on Date column — use sortColumn() check.
     header = panel.table.horizontalHeader()
-    assert header.sortIndicatorSection() == 5  # _COL_DATE
+    assert header.sortIndicatorSection() == _COL_DATE
 
 
 def test_live_insert_with_active_filter_and_sort_keeps_visibility_correct(qapp):
@@ -166,9 +173,173 @@ def test_live_insert_with_active_filter_and_sort_keeps_visibility_correct(qapp):
     # Find each video's current row by scanning UserRole — sort may have
     # reordered them. Then assert hidden state matches the predicate.
     for r in range(panel.table.rowCount()):
-        item = panel.table.item(r, 1)
+        item = panel.table.item(r, _COL_TITLE)
         v = item.data(0x100)  # Qt.ItemDataRole.UserRole
         if v.video_id == "1":
             assert panel.table.isRowHidden(r) is True   # 2020 — outside filter
         elif v.video_id == "2":
             assert panel.table.isRowHidden(r) is False  # 2025 — within filter
+
+
+# ── Downloaded filter / ✓ column / live update ──────────────────────────────
+
+
+def _make_panel_with_history(history_ids: set[str]) -> _Panel:
+    panel = _Panel(placeholder="…")
+    panel.history_ids_resolver = lambda: set(history_ids)
+    return panel
+
+
+def _row_for_video(panel: BaseBrowserPanel, video_id: str) -> int:
+    for r in range(panel.table.rowCount()):
+        item = panel.table.item(r, _COL_TITLE)
+        v = item.data(0x100) if item else None  # UserRole
+        if v is not None and v.video_id == video_id:
+            return r
+    raise AssertionError(f"row for video_id={video_id!r} not found")
+
+
+def test_checkmark_cell_rendered_when_video_in_history(qapp):
+    panel = _make_panel_with_history({"abc"})
+    _push(panel, title="known", video_id="abc", url="u-abc")
+    _push(panel, title="fresh", video_id="def", url="u-def")
+
+    abc_row = _row_for_video(panel, "abc")
+    def_row = _row_for_video(panel, "def")
+    assert panel.table.item(abc_row, _COL_DOWNLOADED).text() == "✓"
+    assert panel.table.item(def_row, _COL_DOWNLOADED).text() == ""
+
+
+def test_downloaded_filter_new_only_hides_downloaded_rows(qapp):
+    panel = _make_panel_with_history({"abc"})
+    _push(panel, title="known", video_id="abc", url="u-abc")
+    _push(panel, title="fresh", video_id="def", url="u-def")
+    panel.set_downloaded_filter("new")
+
+    abc_row = _row_for_video(panel, "abc")
+    def_row = _row_for_video(panel, "def")
+    assert panel.table.isRowHidden(abc_row) is True
+    assert panel.table.isRowHidden(def_row) is False
+
+
+def test_downloaded_filter_downloaded_only_hides_new_rows(qapp):
+    panel = _make_panel_with_history({"abc"})
+    _push(panel, title="known", video_id="abc", url="u-abc")
+    _push(panel, title="fresh", video_id="def", url="u-def")
+    panel.set_downloaded_filter("downloaded")
+
+    abc_row = _row_for_video(panel, "abc")
+    def_row = _row_for_video(panel, "def")
+    assert panel.table.isRowHidden(abc_row) is False
+    assert panel.table.isRowHidden(def_row) is True
+
+
+def test_downloaded_filter_all_shows_everything(qapp):
+    panel = _make_panel_with_history({"abc"})
+    _push(panel, title="known", video_id="abc", url="u-abc")
+    _push(panel, title="fresh", video_id="def", url="u-def")
+    panel.set_downloaded_filter("downloaded")
+    panel.set_downloaded_filter("all")
+
+    for vid in ("abc", "def"):
+        assert panel.table.isRowHidden(_row_for_video(panel, vid)) is False
+
+
+def test_status_label_includes_downloaded_breadcrumb(qapp):
+    panel = _make_panel_with_history({"abc"})
+    _push(panel, title="known", video_id="abc", url="u-abc")
+    _push(panel, title="fresh", video_id="def", url="u-def")
+    panel.set_downloaded_filter("new")
+
+    text = panel.status_label.text()
+    assert "Found 2 videos" in text
+    assert "showing 1" in text
+    assert "1 already downloaded" in text
+
+
+def test_set_downloaded_filter_does_not_double_fire_apply(qapp):
+    """Programmatic restore must signal-block the combo so the debounce
+    timer does not also schedule a redundant _apply_filters pass."""
+    panel = _make_panel_with_history(set())
+    calls: list[int] = []
+    original = panel._apply_filters
+
+    def counted_apply():
+        calls.append(1)
+        original()
+
+    panel._apply_filters = counted_apply  # type: ignore[method-assign]
+
+    panel.set_downloaded_filter("new")
+    # set_downloaded_filter calls _apply_filters exactly once. The combo's
+    # currentIndexChanged signal is blocked, so the search timer must not
+    # have been started — therefore no second _apply_filters fires.
+    assert len(calls) == 1
+    assert panel._search_timer.isActive() is False
+
+
+def test_on_history_changed_coalesces_bursts(qapp):
+    """5 rapid history_changed pulses collapse to one _refresh_downloaded_state call."""
+    panel = _make_panel_with_history(set())
+    _push(panel, title="t", video_id="abc", url="u-abc")
+
+    calls: list[int] = []
+    original = panel._refresh_downloaded_state
+
+    def counted_refresh():
+        calls.append(1)
+        original()
+
+    panel._refresh_downloaded_state = counted_refresh  # type: ignore[method-assign]
+    panel._history_refresh_timer.timeout.disconnect()
+    panel._history_refresh_timer.timeout.connect(panel._refresh_downloaded_state)
+
+    for _ in range(5):
+        panel.on_history_changed()
+
+    # Drain the event loop past the 100 ms timer interval.
+    QApplication.processEvents()
+    qapp.processEvents()
+    import time
+
+    deadline = time.time() + 0.5
+    while time.time() < deadline and not calls:
+        QApplication.processEvents()
+        time.sleep(0.02)
+
+    assert len(calls) == 1
+
+
+def test_select_all_skips_hidden_downloaded_rows(qapp):
+    """Under New only, a downloaded row is hidden — Select All must not check it."""
+    panel = _make_panel_with_history({"abc"})
+    _push(panel, title="known", video_id="abc", url="u-abc")
+    _push(panel, title="fresh", video_id="def", url="u-def")
+    # Clean baseline before hiding anything: both rows visible → deselect both.
+    panel._deselect_all()
+    panel.set_downloaded_filter("new")
+    panel._select_all()
+
+    abc_row = _row_for_video(panel, "abc")
+    def_row = _row_for_video(panel, "def")
+    cb_hidden = panel.table.cellWidget(abc_row, 0)
+    cb_visible = panel.table.cellWidget(def_row, 0)
+    assert cb_hidden.isChecked() is False
+    assert cb_visible.isChecked() is True
+
+
+def test_live_history_change_flips_checkmark_after_refresh(qapp):
+    """When the resolver returns new ids, _refresh_downloaded_state must
+    re-render the ✓ cell for an existing row."""
+    history: set[str] = set()
+    panel = _Panel(placeholder="…")
+    panel.history_ids_resolver = lambda: set(history)
+    _push(panel, title="t", video_id="abc", url="u-abc")
+
+    row = _row_for_video(panel, "abc")
+    assert panel.table.item(row, _COL_DOWNLOADED).text() == ""
+
+    history.add("abc")
+    panel._refresh_downloaded_state()
+
+    assert panel.table.item(row, _COL_DOWNLOADED).text() == "✓"

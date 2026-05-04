@@ -127,6 +127,27 @@ class TestCookiesFileMigration:
         assert raw["tiktok_cookies_file"] == "/tt.txt"
 
 
+class TestBrowseDownloadedFilter:
+    """AppConfig persists per-platform Downloaded combo state across launches."""
+
+    def test_default_is_all_for_both_platforms(self):
+        c = AppConfig()
+        assert c.tiktok_browse_downloaded_filter == "all"
+        assert c.facebook_browse_downloaded_filter == "all"
+
+    def test_save_and_load_roundtrip(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        cfg = AppConfig(
+            tiktok_browse_downloaded_filter="new",
+            facebook_browse_downloaded_filter="downloaded",
+        )
+        with patch("config.CONFIG_PATH", config_path), patch("config.CONFIG_DIR", tmp_path):
+            save_config(cfg)
+            loaded = load_config()
+        assert loaded.tiktok_browse_downloaded_filter == "new"
+        assert loaded.facebook_browse_downloaded_filter == "downloaded"
+
+
 class TestHistory:
     """Test download history persistence."""
 

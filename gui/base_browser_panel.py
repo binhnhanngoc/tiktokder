@@ -12,6 +12,8 @@ rows so users can't accidentally select or download something they filtered out.
 
 from __future__ import annotations
 
+from typing import Callable
+
 from PySide6.QtCore import QDate, QTimer, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -35,15 +37,16 @@ from gui import progress_styles
 from gui._table_items import NumericItem
 from gui.icons import icon
 
-_HEADERS = ("", "Title", "Duration", "Quality", "Views", "Date")
+_HEADERS = ("", "✓", "Title", "Duration", "Quality", "Views", "Date")
 
 # Column indices — single source of truth for sort/render code.
 _COL_CHECK = 0
-_COL_TITLE = 1
-_COL_DURATION = 2
-_COL_QUALITY = 3
-_COL_VIEWS = 4
-_COL_DATE = 5
+_COL_DOWNLOADED = 1
+_COL_TITLE = 2
+_COL_DURATION = 3
+_COL_QUALITY = 4
+_COL_VIEWS = 5
+_COL_DATE = 6
 
 
 class BaseBrowserPanel(QWidget):
@@ -70,6 +73,16 @@ class BaseBrowserPanel(QWidget):
         self._fetcher = None
         self._videos: list[VideoInfo] = []
         self._is_fetching = False
+
+        # MainWindow injects these after construction so the panel can render
+        # the ✓ column + filter without holding a hard ref to DownloadEngine.
+        # `history_record_resolver` is optional; falls back to plain
+        # "Downloaded" tooltip when the lookup is missing.
+        self.history_ids_resolver: Callable[[], set[str]] | None = None
+        self.history_record_resolver: Callable[[str], object | None] | None = None
+        # Per-pass cache populated by _apply_filters so per-row predicate +
+        # cell render avoids calling the resolver N times.
+        self._cached_history_ids: set[str] = set()
 
         layout = QVBoxLayout(self)
 
@@ -116,6 +129,9 @@ class BaseBrowserPanel(QWidget):
         self.table = QTableWidget(0, len(_HEADERS))
         self.table.setHorizontalHeaderLabels(list(_HEADERS))
         self.table.horizontalHeader().setSectionResizeMode(_COL_TITLE, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(
+            _COL_DOWNLOADED, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setSortingEnabled(True)
@@ -150,6 +166,13 @@ class BaseBrowserPanel(QWidget):
         self._search_timer.timeout.connect(self._apply_filters)
         self.search_input.textChanged.connect(lambda _t: self._search_timer.start())
 
+        # Coalesces bursts of engine.history_changed (e.g. 5 downloads
+        # finishing back-to-back) into a single ✓ column re-render.
+        self._history_refresh_timer = QTimer(self)
+        self._history_refresh_timer.setSingleShot(True)
+        self._history_refresh_timer.setInterval(100)
+        self._history_refresh_timer.timeout.connect(self._refresh_downloaded_state)
+
     # --- filter row ---------------------------------------------------------------
 
     def _build_filter_row(self) -> QHBoxLayout:
@@ -160,6 +183,12 @@ class BaseBrowserPanel(QWidget):
         self.quality_combo = QComboBox()
         self.quality_combo.addItem("Quality: All", None)
         row.addWidget(self.quality_combo)
+
+        self.downloaded_combo = QComboBox()
+        self.downloaded_combo.addItem("Downloaded: All", "all")
+        self.downloaded_combo.addItem("New only", "new")
+        self.downloaded_combo.addItem("Downloaded only", "downloaded")
+        row.addWidget(self.downloaded_combo)
 
         self.from_date_check = QCheckBox("From")
         self.from_date_edit = QDateEdit()
@@ -184,6 +213,7 @@ class BaseBrowserPanel(QWidget):
         # Wire every control through the same debounce as the search box.
         for sig in (
             self.quality_combo.currentIndexChanged,
+            self.downloaded_combo.currentIndexChanged,
             self.from_date_check.toggled,
             self.from_date_edit.dateChanged,
             self.to_date_check.toggled,
@@ -260,6 +290,36 @@ class BaseBrowserPanel(QWidget):
         fetcher.start()
         self.fetch_started.emit()
 
+    def _make_downloaded_item(self, video: VideoInfo) -> NumericItem:
+        """Render the ✓ cell. Sort key 1=downloaded, 0=new so DESC groups ✓ rows.
+
+        Tooltip shows ``Downloaded {YYYY-MM-DD HH:MM}`` when the record
+        resolver is wired and returns a value with ``downloaded_at``;
+        otherwise falls back to plain ``Downloaded``.
+        """
+        history_ids = (
+            self._cached_history_ids
+            if self._cached_history_ids
+            else (self.history_ids_resolver() if self.history_ids_resolver else set())
+        )
+        vid = video.video_id or ""
+        if vid and vid in history_ids:
+            item = NumericItem(1, "✓")
+            tooltip = "Downloaded"
+            if self.history_record_resolver is not None:
+                record = self.history_record_resolver(vid)
+                stamp = getattr(record, "downloaded_at", None) if record else None
+                if isinstance(stamp, str) and stamp:
+                    # ISO8601 → strip seconds + tz for compact tooltip.
+                    pretty = stamp.replace("T", " ")[:16]
+                    tooltip = f"Downloaded {pretty}"
+            item.setToolTip(tooltip)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            return item
+        item = NumericItem(0, "")
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        return item
+
     @Slot(object)
     def _on_video_found(self, video: VideoInfo) -> None:
         self._videos.append(video)
@@ -272,6 +332,8 @@ class BaseBrowserPanel(QWidget):
         cb = QCheckBox()
         cb.setChecked(True)
         self.table.setCellWidget(row, _COL_CHECK, cb)
+
+        self.table.setItem(row, _COL_DOWNLOADED, self._make_downloaded_item(video))
 
         # Title cell carries the VideoInfo on UserRole so `_apply_filters` can
         # re-evaluate the predicate without re-parsing display text.
@@ -378,7 +440,7 @@ class BaseBrowserPanel(QWidget):
     # --- filter predicate ---------------------------------------------------------
 
     def _matches(self, video: VideoInfo) -> bool:
-        """True if ``video`` passes search + quality + date filters."""
+        """True if ``video`` passes search + quality + date + downloaded filters."""
         needle = self.search_input.text().strip().lower()
         if needle and needle not in (video.title or "").lower():
             return False
@@ -398,10 +460,22 @@ class BaseBrowserPanel(QWidget):
             if not video.upload_date or video.upload_date > to_str:
                 return False
 
+        mode = self.downloaded_combo.currentData()
+        if mode in ("new", "downloaded"):
+            is_downloaded = (video.video_id or "") in self._cached_history_ids
+            if mode == "new" and is_downloaded:
+                return False
+            if mode == "downloaded" and not is_downloaded:
+                return False
+
         return True
 
     def _apply_filters(self) -> None:
         """Re-evaluate every row's visibility against current filters."""
+        # Snapshot history ids once per pass so per-row predicate is O(1).
+        self._cached_history_ids = (
+            self.history_ids_resolver() if self.history_ids_resolver else set()
+        )
         # Disable sort while toggling visibility — minor perf, also avoids any
         # cosmetic flicker if Qt re-runs the comparator mid-toggle.
         self.table.setSortingEnabled(False)
@@ -423,7 +497,15 @@ class BaseBrowserPanel(QWidget):
         if visible == total:
             self.status_label.setText(f"Found {total} videos")
         else:
-            self.status_label.setText(f"Found {total} videos — showing {visible}")
+            downloaded_total = sum(
+                1
+                for v in self._videos
+                if (v.video_id or "") in self._cached_history_ids
+            )
+            self.status_label.setText(
+                f"Found {total} videos — showing {visible} "
+                f"({downloaded_total} already downloaded)"
+            )
 
     @staticmethod
     def _format_duration(seconds: int) -> str:
@@ -486,3 +568,39 @@ class BaseBrowserPanel(QWidget):
             self._rebuild_quality_combo()
             self._apply_filters()
             self.status_label.setText(f"Restored {len(self._videos)} videos")
+
+    # --- Downloaded filter / live refresh ----------------------------------------
+
+    def set_downloaded_filter(self, mode: str) -> None:
+        """Programmatic combo restore — signal-blocked so it doesn't double-fire filters."""
+        idx = self.downloaded_combo.findData(mode)
+        if idx < 0:
+            return
+        self.downloaded_combo.blockSignals(True)
+        self.downloaded_combo.setCurrentIndex(idx)
+        self.downloaded_combo.blockSignals(False)
+        self._apply_filters()
+
+    @Slot()
+    def on_history_changed(self) -> None:
+        """Coalesce bursts of engine signal — fire one refresh after 100 ms idle."""
+        self._history_refresh_timer.start()
+
+    def _refresh_downloaded_state(self) -> None:
+        """Re-render every ✓ cell + re-apply filter (e.g. New only hides newly-downloaded rows)."""
+        # Refresh resolver snapshot before per-row render so cells use the new ids.
+        self._cached_history_ids = (
+            self.history_ids_resolver() if self.history_ids_resolver else set()
+        )
+        self.table.setSortingEnabled(False)
+        for row in range(self.table.rowCount()):
+            title_item = self.table.item(row, _COL_TITLE)
+            video = (
+                title_item.data(Qt.ItemDataRole.UserRole) if title_item else None
+            )
+            if isinstance(video, VideoInfo):
+                self.table.setItem(
+                    row, _COL_DOWNLOADED, self._make_downloaded_item(video)
+                )
+        self.table.setSortingEnabled(True)
+        self._apply_filters()

@@ -2,7 +2,7 @@
 
 A Python desktop and CLI tool for batch-downloading videos from TikTok and Facebook without watermarks. Dual interface: PySide6 GUI or CLI with Rich progress UI.
 
-**v1.7.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
+**v1.8.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
 
 ## Features
 
@@ -12,7 +12,7 @@ A Python desktop and CLI tool for batch-downloading videos from TikTok and Faceb
 - **Platform-First UI** — Top-level **TikTok** and **Facebook** tabs, each with Channels (saved list) / Queue / Library sub-tabs; persistent global URL bar auto-routes pasted URLs by platform; status bar shows per-platform queue + done badges
 - **Saved Channels** — Save channels/pages with optional nicknames; right-click for `Download all new` (filters out already-downloaded and pre-cutoff videos)
 - **Library View** — Per-platform 3-pane: uploader sidebar (★ marks saved channels), sortable/filterable history table with a thumbnail column, and a right-side preview pane showing the large thumbnail, metadata, and full description; filter by quality / date range / size / file status; search box matches title, uploader, URL, and description text; right-click rows to open file, open folder, re-download, copy URL, or remove
-- **Channel Browse Filters** — TikTok and Facebook channel browse tables include a search box, Quality dropdown, From/To date range, and sortable headers so large listings can be narrowed before selecting which videos to download. Select All / Download Selected respect the active filter — hidden rows are never queued by accident
+- **Channel Browse Filters** — TikTok and Facebook channel browse tables include a search box, Quality dropdown, From/To date range, sortable headers, plus a Downloaded filter (`All` / `New only` / `Downloaded only`) and a sortable `✓` marker column with download-timestamp tooltip. The combo state persists per platform across relaunches and refreshes live as new downloads complete. Select All / Download Selected respect the active filter — hidden rows are never queued by accident
 - **Quality Selector** — Default Quality setting (`Best`, `1080p`, `720p`, `480p`, `Audio only`) plus optional subtitle (`en`) downloads (thumbnails are always written as sidecars next to each video so the Library can show previews)
 - **Concurrent Downloads** — ThreadPoolExecutor with configurable workers (default: 3)
 - **Per-uploader Folder Layout** — Output organized as `downloads/{platform}/{uploader}/{title} [{short_id}].{ext}`. The 6-char ID suffix uniquifies same-title videos; legacy `{id}_{title}.{ext}` files from prior versions remain dedup-recognized.

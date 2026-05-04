@@ -189,7 +189,7 @@ def validate_tiktok_url(url: str) -> bool:
 ### `gui/base_browser_panel.py`
 - **Purpose:** Shared base for TikTok and Facebook browser panels
 - **Classes:**
-  - `BaseBrowserPanel(QWidget)` — URL input + Browse button, video table, Select All/Deselect/Download Selected, state snapshot/restore
+  - `BaseBrowserPanel(QWidget)` — URL input + Browse button, video table (`✓` / Title / Duration / Quality / Views / Date columns), Quality + 3-state Downloaded (`All` / `New only` / `Downloaded only`) combos, From/To date toggles, Select All/Deselect/Download Selected, state snapshot/restore. Injected resolvers — `history_ids_resolver: () -> set[str]` and `history_record_resolver: (id) -> HistoryRecord | None` — drive the `✓` cell + Downloaded predicate; `on_history_changed` coalesces engine pulses through a 100 ms one-shot timer before rebuilding the column.
 
 ### `gui/tiktok_browser_panel.py`
 - **Purpose:** TikTok channel browser UI

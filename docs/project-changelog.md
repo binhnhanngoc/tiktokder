@@ -9,6 +9,21 @@ TikTokDer follows [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 
 The single source of truth is `version.py` (`__version__`). The README badge line and the latest changelog entry below must match it on every release. See `docs/release-process.md` for the bump checklist.
 
+## [1.8.0] — 2026-05-04 — Channel browse Downloaded filter
+
+### Added
+- **Downloaded filter combo** — TikTok and Facebook browse sub-panels gain a 3-state `Downloaded:` combo (`All` / `New only` / `Downloaded only`) sharing the existing 200 ms debounce timer. AND-combines with search / Quality / date range; status-label tail reads `Found N videos — showing M (K already downloaded)` whenever a filter hides rows.
+- **`✓` marker column** — sortable column rendering `✓` for rows whose `video.video_id ∈ history`, with a tooltip showing the `downloaded_at` timestamp from `HistoryRecord` when available. `NumericItem(1, "✓")` / `NumericItem(0, "")` keeps DESC sort grouping downloaded rows together.
+- **Per-platform persistence** — two new `AppConfig` string fields (`tiktok_browse_downloaded_filter`, `facebook_browse_downloaded_filter`, default `"all"`); `MainWindow` restores combo state at init and writes back through `save_config` on every `currentIndexChanged`.
+- **Live `✓` refresh on download completion** — `BaseBrowserPanel.on_history_changed` slot is wired to `engine.history_changed`; bursts coalesce through a 100 ms one-shot `QTimer` before re-rendering every `✓` cell + reapplying the filter, so a row in the panel flips its mark within ~100 ms of the worker finishing.
+
+### Changed
+- **`BaseBrowserPanel` table layout** — column count 6 → 7; new `_COL_DOWNLOADED = 1` shifts every later constant. All call sites use the constants (no integer literals leaked).
+- **`_apply_filters` snapshots history ids once per pass** into `self._cached_history_ids` so the per-row predicate is O(1).
+
+### Notes
+- 11 new tests (`test_base_browser_panel.py` × 9 covering ✓ render, 3-state predicate, status breadcrumb, signal-block restore, coalesced refresh, hide-aware Select All; `test_config.py` × 2 round-trip). 485 total pass repo-wide.
+
 ## [1.7.0] — 2026-05-04 — Channel browse filters + title-leading filenames
 
 ### Added

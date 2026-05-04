@@ -28,6 +28,7 @@ from config import (
     SAVED_CHANNELS_PATH,
     STATE_PATH,
     load_history_records,
+    save_config,
     save_history_records,
 )
 from download_engine import DownloadEngine
@@ -165,6 +166,25 @@ class MainWindow(QMainWindow):
         self.tiktok_tab.channels_panel.history_ids_resolver = lambda: set(self.engine._history)
         self.facebook_tab.channels_panel.history_ids_resolver = lambda: set(self.engine._history)
 
+        # Browser panels: same id resolver for the ✓ column / Downloaded
+        # filter, plus a record resolver for the timestamp tooltip. Records
+        # are loaded from disk lazily and invalidated on history_changed.
+        self._history_records_cache: dict[str, HistoryRecord] | None = None
+        for browser in (self._tiktok_browser, self._facebook_browser):
+            browser.history_ids_resolver = lambda: set(self.engine._history)
+            browser.history_record_resolver = self._lookup_history_record
+
+        # Restore + persist + live-refresh the per-platform Downloaded combo.
+        for browser, field_name in (
+            (self._tiktok_browser, "tiktok_browse_downloaded_filter"),
+            (self._facebook_browser, "facebook_browse_downloaded_filter"),
+        ):
+            browser.set_downloaded_filter(getattr(self.config, field_name))
+            browser.downloaded_combo.currentIndexChanged.connect(
+                lambda _i, b=browser, f=field_name: self._save_browse_filter(b, f)
+            )
+            self.engine.history_changed.connect(browser.on_history_changed)
+
         # Replace placeholder Library panels with the real two-pane widgets.
         self.tiktok_tab.replace_library_panel(
             LibraryPanel(platform="tiktok", saved_store=self._saved_store)
@@ -232,6 +252,9 @@ class MainWindow(QMainWindow):
         self.engine.history_changed.connect(self.tiktok_tab.library_panel.refresh)
         self.engine.history_changed.connect(self.facebook_tab.library_panel.refresh)
         self.engine.history_changed.connect(self._refresh_health)
+        # Drop the by-id record cache so the browser ✓ tooltip picks up new
+        # downloads immediately (Phase 03 wires the live cell refresh).
+        self.engine.history_changed.connect(self._invalidate_history_records_cache)
 
         # Initial population.
         self.tiktok_tab.library_panel.refresh()
@@ -428,6 +451,29 @@ class MainWindow(QMainWindow):
         elif kind == "refresh_channel" and arg:
             self._refresh_saved_channel(arg)
         # "none" / unknown → no-op
+
+    def _save_browse_filter(self, panel, field_name: str) -> None:
+        """Persist combo selection to AppConfig on every change."""
+        setattr(self.config, field_name, panel.downloaded_combo.currentData())
+        try:
+            save_config(self.config)
+        except OSError:
+            # Persistence is best-effort — the combo state lives in-memory
+            # for the rest of the session even if the disk write failed.
+            pass
+
+    def _lookup_history_record(self, video_id: str) -> HistoryRecord | None:
+        """Lazy by-id lookup over history records; cache invalidated on history_changed."""
+        if not video_id:
+            return None
+        if self._history_records_cache is None:
+            self._history_records_cache = {
+                r.video_id: r for r in load_history_records() if r.video_id
+            }
+        return self._history_records_cache.get(video_id)
+
+    def _invalidate_history_records_cache(self) -> None:
+        self._history_records_cache = None
 
     def _refresh_saved_channel(self, channel_url: str) -> None:
         """Find the saved channel in either platform tab and trigger its refresh."""

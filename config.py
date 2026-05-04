@@ -103,6 +103,10 @@ class AppConfig:
     history_max_entries: int = DEFAULT_MAX_ENTRIES
     theme_mode: str = "system"           # one of system|light|dark
     facebook_max_scrolls_default: int = 10
+    # Channel-browse Downloaded filter — persisted per platform.
+    # One of: "all" | "new" | "downloaded".
+    tiktok_browse_downloaded_filter: str = "all"
+    facebook_browse_downloaded_filter: str = "all"
 
 
 @dataclass(frozen=True)
