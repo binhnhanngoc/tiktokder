@@ -39,7 +39,9 @@ from config import (
     FB_LOGIN_WALL_MARKERS,
     get_platform_defaults,
     get_max_retry_attempts,
+    load_history_records,
 )
+from path_builder import FILENAME_TEMPLATE
 from yt_dlp_helpers import apply_cookies
 from retry_policy import (
     LoginRequired,
@@ -215,7 +217,9 @@ def get_ydl_opts(
     takes precedence over `cookie_browser` for the same call.
     """
     opts = {
-        "outtmpl": os.path.join(output_dir, "%(id)s_%(title).50s.%(ext)s"),
+        # Default outtmpl for any caller that bypasses ``_do_download`` (which
+        # rewrites this per-call with a platform/uploader-aware folder).
+        "outtmpl": os.path.join(output_dir, FILENAME_TEMPLATE),
         "format": _format_for_quality(quality),
         "quiet": True,
         "no_warnings": True,
@@ -259,22 +263,59 @@ def get_ydl_opts(
     return opts
 
 
+# Legacy filename shape was ``<digits>_<title>.<ext>`` — kept regex-readable
+# so files saved under prior versions are still dedup-recognized.
+LEGACY_ID_RE = re.compile(r"^(\d{15,25})_")
+
+
+def _path_under(child: str, parent: str) -> bool:
+    """True if ``child`` is the same as or nested inside ``parent``.
+
+    Resolves symlinks via ``realpath`` first, defeating ``..`` traversal in a
+    poisoned history record. ``commonpath`` raises ``ValueError`` when the
+    paths share no common root (e.g. different drives on Windows) — caught
+    and treated as "not under".
+    """
+    if not child or not parent:
+        return False
+    try:
+        c = os.path.realpath(child)
+        p = os.path.realpath(parent)
+        return os.path.commonpath([c, p]) == p
+    except ValueError:
+        return False
+
+
 def get_downloaded_ids(output_dir: str) -> set[str]:
     """Recursively scan output dir for already-downloaded video IDs.
 
-    Walks subfolders (platform/uploader tree) so old flat-root files and the
-    new nested layout are both considered. Symlinks are NOT followed to avoid
-    loop attacks if the user puts a symlink inside ``downloads/``.
+    Two complementary signals — IDs from EITHER source count as downloaded:
+
+    1. **Legacy filename regex** (``<digits>_*``): files saved before the
+       v1.7 filename change live under the platform/uploader tree with the
+       ID as their filename prefix. Walked via ``os.walk(followlinks=False)``
+       to skip symlink loops.
+    2. **History oracle** (``history.json``): files saved under the new
+       title-leading shape carry no parseable ID prefix, so we cross-reference
+       ``HistoryRecord.video_id`` with the recorded ``file_path``. Records
+       whose path is missing from disk OR escapes ``output_dir`` are skipped
+       so a stale/poisoned history can't leak phantom IDs into the dedup set.
     """
     ids: set[str] = set()
-    if not os.path.isdir(output_dir):
-        return ids
-    pattern = re.compile(r"^(\d{15,25})_")
-    for root, _dirs, files in os.walk(output_dir, followlinks=False):
-        for filename in files:
-            match = pattern.match(filename)
-            if match:
-                ids.add(match.group(1))
+    if os.path.isdir(output_dir):
+        for _root, _dirs, files in os.walk(output_dir, followlinks=False):
+            for filename in files:
+                match = LEGACY_ID_RE.match(filename)
+                if match:
+                    ids.add(match.group(1))
+
+    for rec in load_history_records():
+        if not rec.video_id or not rec.file_path:
+            continue
+        if not _path_under(rec.file_path, output_dir):
+            continue
+        if os.path.exists(rec.file_path):
+            ids.add(rec.video_id)
     return ids
 
 

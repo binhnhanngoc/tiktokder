@@ -630,6 +630,74 @@ class TestGetDownloadedIds:
             ids = get_downloaded_ids(tmpdir)
             assert len(ids) == 0
 
+    def test_get_downloaded_ids_finds_new_template_via_history(self, monkeypatch):
+        """New title-leading filenames get dedup-recognized via history.json."""
+        from history_store import HistoryRecord
+        import downloader as dl
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = Path(tmpdir, "tiktok", "@user")
+            video_path.mkdir(parents=True)
+            f = video_path / "My Cool Video [abc123].mp4"
+            f.touch()
+
+            rec = HistoryRecord(
+                video_id="7777777777777777777",
+                file_path=str(f),
+                platform="tiktok",
+            )
+            monkeypatch.setattr(dl, "load_history_records", lambda: [rec])
+
+            ids = get_downloaded_ids(tmpdir)
+            assert "7777777777777777777" in ids
+
+    def test_get_downloaded_ids_unions_legacy_and_history(self, monkeypatch):
+        """Mix of legacy ID-prefixed file + new-template file in history → both detected."""
+        from history_store import HistoryRecord
+        import downloader as dl
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            legacy = Path(tmpdir, "tiktok", "@user")
+            legacy.mkdir(parents=True)
+            (legacy / "111111111111111_old.mp4").touch()
+
+            new_file = legacy / "fresh title [xyz999].mp4"
+            new_file.touch()
+            rec = HistoryRecord(video_id="222222222222222", file_path=str(new_file))
+            monkeypatch.setattr(dl, "load_history_records", lambda: [rec])
+
+            ids = get_downloaded_ids(tmpdir)
+            assert ids == {"111111111111111", "222222222222222"}
+
+    def test_get_downloaded_ids_history_skips_missing_file(self, monkeypatch):
+        """History record pointing at a path that no longer exists is ignored."""
+        from history_store import HistoryRecord
+        import downloader as dl
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rec = HistoryRecord(
+                video_id="333",
+                file_path=str(Path(tmpdir, "tiktok", "deleted.mp4")),
+            )
+            monkeypatch.setattr(dl, "load_history_records", lambda: [rec])
+
+            ids = get_downloaded_ids(tmpdir)
+            assert "333" not in ids
+
+    def test_get_downloaded_ids_history_rejects_outside_output_dir(self, monkeypatch):
+        """Poisoned record with file_path outside output_dir does NOT leak."""
+        from history_store import HistoryRecord
+        import downloader as dl
+
+        with tempfile.TemporaryDirectory() as tmpdir, tempfile.TemporaryDirectory() as elsewhere:
+            outside = Path(elsewhere) / "file.mp4"
+            outside.touch()
+            rec = HistoryRecord(video_id="444", file_path=str(outside))
+            monkeypatch.setattr(dl, "load_history_records", lambda: [rec])
+
+            ids = get_downloaded_ids(tmpdir)
+            assert "444" not in ids
+
 
 class TestDownloadResult:
     """Test DownloadResult dataclass."""

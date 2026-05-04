@@ -34,7 +34,7 @@ class TestEngineHistoryPersistence:
                     "height": 720,
                     "filesize_approx": 2048,
                     "requested_downloads": [
-                        {"filepath": "/tmp/1234567890123456789_hello.mp4", "height": 720}
+                        {"filepath": "/tmp/hello [123456].mp4", "height": 720}
                     ],
                 }
             def wait(self):
@@ -54,7 +54,7 @@ class TestEngineHistoryPersistence:
         assert rec.title == "hello"
         assert rec.url == url
         assert rec.quality == "720p"
-        assert rec.file_path == "/tmp/1234567890123456789_hello.mp4"
+        assert rec.file_path == "/tmp/hello [123456].mp4"
         assert rec.size_bytes == 2048
 
     def test_engine_emits_history_changed_signal(self):

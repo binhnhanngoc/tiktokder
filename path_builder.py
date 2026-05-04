@@ -1,11 +1,16 @@
 """Pure helpers for computing platform-aware download paths.
 
-Layout: ``<base_dir>/<platform>/<slug_uploader>/<id>_<title>.<ext>``.
+Layout: ``<base_dir>/<platform>/<slug_uploader>/<title> [<id6>].<ext>``.
 
 `build_output_template` returns a fully-resolved yt-dlp ``outtmpl`` string —
 platform + uploader segments are baked in by Python so empty metadata can
 never produce a stray ``downloads/tiktok//...`` path. Only the per-video
-fields (``%(id)s``, ``%(title).50s``, ``%(ext)s``) are left to yt-dlp.
+fields (``%(title).80s``, ``%(id).6s``, ``%(ext)s``) are left to yt-dlp.
+
+The 6-char bracketed ID suffix uniquifies same-title downloads (silent
+overwrites would be data loss) while keeping the title visually dominant.
+Legacy ``<id>_<title>.<ext>`` files on disk stay readable to the dedup
+scanner — see ``downloader.LEGACY_ID_RE`` and ``downloader.get_downloaded_ids``.
 """
 
 from __future__ import annotations
@@ -24,7 +29,9 @@ _PATH_SEP = re.compile(r"[\\/]+")
 _WHITESPACE = re.compile(r"\s+")
 _UNDERSCORE_RUN = re.compile(r"_+")
 _NUMERIC_ONLY = re.compile(r"^\d+$")
-_FILENAME_TEMPLATE = "%(id)s_%(title).50s.%(ext)s"
+# Title-leading shape: title cap at 80 chars (yt-dlp truncates to keep paths
+# under Windows MAX_PATH); 6-char bracketed ID uniquifies same-title videos.
+FILENAME_TEMPLATE = "%(title).80s [%(id).6s].%(ext)s"
 
 
 def _looks_like_id(value: str | None) -> bool:
@@ -142,8 +149,8 @@ def build_output_template(
     4. URL path slug (TikTok handle / Facebook page segment).
     5. ``unknown_uploader``.
 
-    The trailing filename portion is always ``%(id)s_%(title).50s.%(ext)s``
-    so yt-dlp fills in per-video fields.
+    The trailing filename portion is always ``FILENAME_TEMPLATE`` so yt-dlp
+    fills in per-video fields.
     """
     platform = detect_platform(url) or "unknown"
     uploader = (
@@ -153,7 +160,7 @@ def build_output_template(
     )
     slug = slugify_uploader(uploader)
     folder = os.path.join(base_dir, platform, slug)
-    return os.path.join(folder, _FILENAME_TEMPLATE)
+    return os.path.join(folder, FILENAME_TEMPLATE)
 
 
 def _uploader_from_hint(hint: str | None) -> str | None:

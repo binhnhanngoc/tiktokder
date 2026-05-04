@@ -90,21 +90,25 @@ class TestPlatformSlugFromUrl:
 
 class TestBuildOutputTemplate:
     def test_tiktok_with_uploader_metadata(self):
+        from path_builder import FILENAME_TEMPLATE
+
         url = "https://www.tiktok.com/@user/video/123"
         info = {"uploader": "@user", "id": "123"}
         tmpl = build_output_template(url, info, "downloads")
         # Normalize for cross-platform.
         norm = tmpl.replace(os.sep, "/")
-        assert norm == "downloads/tiktok/@user/%(id)s_%(title).50s.%(ext)s"
+        assert norm == f"downloads/tiktok/@user/{FILENAME_TEMPLATE}"
 
     def test_facebook_no_uploader_falls_back_to_url_slug(self):
+        from path_builder import FILENAME_TEMPLATE
+
         url = "https://www.facebook.com/PageName/videos/123"
         info = {}  # uploader missing
         tmpl = build_output_template(url, info, "downloads")
         norm = tmpl.replace(os.sep, "/")
         assert "facebook" in norm
         assert "PageName" in norm
-        assert norm.endswith("/%(id)s_%(title).50s.%(ext)s")
+        assert norm.endswith(f"/{FILENAME_TEMPLATE}")
 
     def test_unknown_platform_uses_unknown_segment(self):
         url = "https://example.com/something/123"
