@@ -48,6 +48,7 @@ from gui._history_helpers import (
     open_path,
     reveal_in_file_manager,
 )
+from gui._table_items import NumericItem as _NumericItem
 from gui.library_preview_pane import (
     PREVIEW_H as _PREVIEW_H,
     PREVIEW_W as _PREVIEW_W,
@@ -106,23 +107,6 @@ def _uploader_from_url(url: str | None) -> str | None:
     if first.startswith("@"):
         return first
     return first or None
-
-
-class _NumericItem(QTableWidgetItem):
-    """Table item that sorts by a stored numeric value, displays an arbitrary string.
-
-    Used for the Size column so "1.5 MB" and "900 KB" compare by bytes rather
-    than alphabetically.
-    """
-
-    def __init__(self, value: int, display: str) -> None:
-        super().__init__(display)
-        self._sort_value = value
-
-    def __lt__(self, other: object) -> bool:  # type: ignore[override]
-        if isinstance(other, _NumericItem):
-            return self._sort_value < other._sort_value
-        return super().__lt__(other)  # type: ignore[arg-type]
 
 
 class LibraryPanel(QWidget):

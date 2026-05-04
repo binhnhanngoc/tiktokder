@@ -1,15 +1,22 @@
 """Shared widget logic for TikTok and Facebook browser sub-panels.
 
 Subclasses implement ``_create_fetcher`` to return the platform-specific
-QThread fetcher. Common UX (URL input, video table with checkboxes, select
-all/none, download-selected) lives here.
+QThread fetcher. Common UX (URL input, video table with checkboxes, search +
+filter row, sortable headers, select all/none, download-selected) lives here.
+
+Filtering is view-only — the underlying ``self._videos`` list is never mutated
+because ``SavedChannelsPanel`` consumes it for the "Download new only" flow.
+Rows are hidden via ``setRowHidden`` and the bottom-row actions ignore hidden
+rows so users can't accidentally select or download something they filtered out.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import QDate, QTimer, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
+    QDateEdit,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -25,13 +32,22 @@ from PySide6.QtWidgets import (
 from app_state import BrowserPanelState, VideoInfoState
 from channel_fetcher import VideoInfo
 from gui import progress_styles
+from gui._table_items import NumericItem
 from gui.icons import icon
 
 _HEADERS = ("", "Title", "Duration", "Quality", "Views", "Date")
 
+# Column indices — single source of truth for sort/render code.
+_COL_CHECK = 0
+_COL_TITLE = 1
+_COL_DURATION = 2
+_COL_QUALITY = 3
+_COL_VIEWS = 4
+_COL_DATE = 5
+
 
 class BaseBrowserPanel(QWidget):
-    """Base panel with URL input + video table + select/download controls."""
+    """Base panel with URL input + filter row + video table + select/download controls."""
 
     # Emits (urls, page_hint) — page_hint is the source page URL the user
     # browsed to scrape these videos. Empty string when not applicable.
@@ -86,14 +102,24 @@ class BaseBrowserPanel(QWidget):
         progress_styles.apply(self.progress_bar, "indeterminate", "normal")
         layout.addWidget(self.progress_bar)
 
+        # Filter row + search box — both funnel into one debounced timer that
+        # re-runs `_apply_filters` over every fetched row. Mirrors LibraryPanel.
+        layout.addLayout(self._build_filter_row())
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search title…")
+        layout.addWidget(self.search_input)
+
         self.status_label = QLabel("")
         layout.addWidget(self.status_label)
 
         self.table = QTableWidget(0, len(_HEADERS))
         self.table.setHorizontalHeaderLabels(list(_HEADERS))
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(_COL_TITLE, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.verticalHeader().setVisible(False)
+        self.table.setSortingEnabled(True)
+        self.table.sortByColumn(_COL_DATE, Qt.SortOrder.DescendingOrder)
         layout.addWidget(self.table)
 
         self._bottom_row = QHBoxLayout()
@@ -114,6 +140,70 @@ class BaseBrowserPanel(QWidget):
         self.download_btn.clicked.connect(self._on_download)
         self._bottom_row.addWidget(self.download_btn)
         layout.addLayout(self._bottom_row)
+
+        # Debounced filter (200 ms). Single timer for search + every filter
+        # control — they all funnel into _apply_filters() which re-runs the
+        # entire predicate chain anyway.
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(200)
+        self._search_timer.timeout.connect(self._apply_filters)
+        self.search_input.textChanged.connect(lambda _t: self._search_timer.start())
+
+    # --- filter row ---------------------------------------------------------------
+
+    def _build_filter_row(self) -> QHBoxLayout:
+        """Quality dropdown + From/To date toggles in a single row."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItem("Quality: All", None)
+        row.addWidget(self.quality_combo)
+
+        self.from_date_check = QCheckBox("From")
+        self.from_date_edit = QDateEdit()
+        self.from_date_edit.setCalendarPopup(True)
+        self.from_date_edit.setDate(QDate.currentDate().addMonths(-1))
+        self.from_date_edit.setEnabled(False)
+        self.from_date_check.toggled.connect(self.from_date_edit.setEnabled)
+        row.addWidget(self.from_date_check)
+        row.addWidget(self.from_date_edit)
+
+        self.to_date_check = QCheckBox("To")
+        self.to_date_edit = QDateEdit()
+        self.to_date_edit.setCalendarPopup(True)
+        self.to_date_edit.setDate(QDate.currentDate())
+        self.to_date_edit.setEnabled(False)
+        self.to_date_check.toggled.connect(self.to_date_edit.setEnabled)
+        row.addWidget(self.to_date_check)
+        row.addWidget(self.to_date_edit)
+
+        row.addStretch()
+
+        # Wire every control through the same debounce as the search box.
+        for sig in (
+            self.quality_combo.currentIndexChanged,
+            self.from_date_check.toggled,
+            self.from_date_edit.dateChanged,
+            self.to_date_check.toggled,
+            self.to_date_edit.dateChanged,
+        ):
+            sig.connect(lambda *_: self._search_timer.start())
+
+        return row
+
+    def _rebuild_quality_combo(self) -> None:
+        """Repopulate Quality combo from observed values, preserving selection."""
+        current = self.quality_combo.currentData()
+        self.quality_combo.blockSignals(True)
+        self.quality_combo.clear()
+        self.quality_combo.addItem("Quality: All", None)
+        for q in sorted({v.quality for v in self._videos if v.quality}):
+            self.quality_combo.addItem(q, q)
+        idx = self.quality_combo.findData(current)
+        self.quality_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.quality_combo.blockSignals(False)
 
     # --- subclass extension point -------------------------------------------------
 
@@ -173,23 +263,53 @@ class BaseBrowserPanel(QWidget):
     @Slot(object)
     def _on_video_found(self, video: VideoInfo) -> None:
         self._videos.append(video)
+        # Disable sorting during insert so Qt doesn't reshuffle the table for
+        # every row — re-enabled at the end of the method.
+        self.table.setSortingEnabled(False)
         row = self.table.rowCount()
         self.table.insertRow(row)
 
         cb = QCheckBox()
         cb.setChecked(True)
-        self.table.setCellWidget(row, 0, cb)
+        self.table.setCellWidget(row, _COL_CHECK, cb)
 
-        self.table.setItem(row, 1, QTableWidgetItem(video.title))
-        dur = self._format_duration(video.duration) if video.duration else "—"
-        self.table.setItem(row, 2, QTableWidgetItem(dur))
-        self.table.setItem(row, 3, QTableWidgetItem(video.quality or "—"))
-        views = f"{video.view_count:,}" if video.view_count else "—"
-        self.table.setItem(row, 4, QTableWidgetItem(views))
-        date = self._format_date(video.upload_date) if video.upload_date else "—"
-        self.table.setItem(row, 5, QTableWidgetItem(date))
+        # Title cell carries the VideoInfo on UserRole so `_apply_filters` can
+        # re-evaluate the predicate without re-parsing display text.
+        title_item = QTableWidgetItem(video.title)
+        title_item.setData(Qt.ItemDataRole.UserRole, video)
+        self.table.setItem(row, _COL_TITLE, title_item)
 
-        self.status_label.setText(f"Found {len(self._videos)} videos...")
+        dur_secs = video.duration or 0
+        dur_text = self._format_duration(video.duration) if video.duration else "—"
+        self.table.setItem(row, _COL_DURATION, NumericItem(dur_secs, dur_text))
+
+        self.table.setItem(row, _COL_QUALITY, QTableWidgetItem(video.quality or "—"))
+
+        views_val = video.view_count or 0
+        views_text = f"{video.view_count:,}" if video.view_count else "—"
+        self.table.setItem(row, _COL_VIEWS, NumericItem(views_val, views_text))
+
+        date_val = int(video.upload_date) if (video.upload_date or "").isdigit() else 0
+        date_text = self._format_date(video.upload_date) if video.upload_date else "—"
+        self.table.setItem(row, _COL_DATE, NumericItem(date_val, date_text))
+
+        self.table.setSortingEnabled(True)
+
+        # Re-apply the predicate over EVERY row by current index — re-enabling
+        # sorting can reorder rows, so the freshly captured `row` index is no
+        # longer guaranteed to point at this video. _apply_filters reads the
+        # VideoInfo from each cell's UserRole and is index-correct.
+        self._apply_filters()
+        # Show ellipsis during live fetch so the user can tell more rows are
+        # still streaming in. _apply_filters' final-state text gets overwritten.
+        total = len(self._videos)
+        visible = sum(
+            1 for r in range(self.table.rowCount()) if not self.table.isRowHidden(r)
+        )
+        if visible == total:
+            self.status_label.setText(f"Found {total} videos…")
+        else:
+            self.status_label.setText(f"Found {total} videos — showing {visible}…")
 
     @Slot(str)
     def _on_error(self, msg: str) -> None:
@@ -202,7 +322,8 @@ class BaseBrowserPanel(QWidget):
         self.url_input.setEnabled(True)
         self.cancel_btn.setVisible(False)
         self.progress_bar.setVisible(False)
-        self.status_label.setText(f"Found {total} videos")
+        self._rebuild_quality_combo()
+        self._apply_filters()
         self.fetch_completed.emit(total)
         self.fetch_finished.emit()
 
@@ -227,19 +348,82 @@ class BaseBrowserPanel(QWidget):
         self._set_all_checks(False)
 
     def _set_all_checks(self, value: bool) -> None:
+        # Skip hidden rows so users don't accidentally toggle filtered-out
+        # entries — they can't see them and probably didn't mean them.
         for row in range(self.table.rowCount()):
-            cb = self.table.cellWidget(row, 0)
+            if self.table.isRowHidden(row):
+                continue
+            cb = self.table.cellWidget(row, _COL_CHECK)
             if cb:
                 cb.setChecked(value)
 
     def _on_download(self) -> None:
         urls: list[str] = []
         for row in range(self.table.rowCount()):
-            cb = self.table.cellWidget(row, 0)
+            if self.table.isRowHidden(row):
+                continue
+            cb = self.table.cellWidget(row, _COL_CHECK)
             if cb and cb.isChecked():
-                urls.append(self._videos[row].url)
+                title_item = self.table.item(row, _COL_TITLE)
+                video = (
+                    title_item.data(Qt.ItemDataRole.UserRole)
+                    if title_item
+                    else None
+                )
+                if isinstance(video, VideoInfo):
+                    urls.append(video.url)
         if urls:
             self.download_requested.emit(urls, self.url_input.text().strip())
+
+    # --- filter predicate ---------------------------------------------------------
+
+    def _matches(self, video: VideoInfo) -> bool:
+        """True if ``video`` passes search + quality + date filters."""
+        needle = self.search_input.text().strip().lower()
+        if needle and needle not in (video.title or "").lower():
+            return False
+
+        quality_filter = self.quality_combo.currentData()
+        if quality_filter and (video.quality or "") != quality_filter:
+            return False
+
+        # upload_date is stored as YYYYMMDD; QDateEdit gives us yyyyMMdd via
+        # toString — same lexical ordering as numeric, so direct compare works.
+        if self.from_date_check.isChecked():
+            from_str = self.from_date_edit.date().toString("yyyyMMdd")
+            if not video.upload_date or video.upload_date < from_str:
+                return False
+        if self.to_date_check.isChecked():
+            to_str = self.to_date_edit.date().toString("yyyyMMdd")
+            if not video.upload_date or video.upload_date > to_str:
+                return False
+
+        return True
+
+    def _apply_filters(self) -> None:
+        """Re-evaluate every row's visibility against current filters."""
+        # Disable sort while toggling visibility — minor perf, also avoids any
+        # cosmetic flicker if Qt re-runs the comparator mid-toggle.
+        self.table.setSortingEnabled(False)
+        visible = 0
+        for row in range(self.table.rowCount()):
+            title_item = self.table.item(row, _COL_TITLE)
+            video = (
+                title_item.data(Qt.ItemDataRole.UserRole) if title_item else None
+            )
+            ok = isinstance(video, VideoInfo) and self._matches(video)
+            self.table.setRowHidden(row, not ok)
+            if ok:
+                visible += 1
+        self.table.setSortingEnabled(True)
+
+        total = len(self._videos)
+        if total == 0:
+            return
+        if visible == total:
+            self.status_label.setText(f"Found {total} videos")
+        else:
+            self.status_label.setText(f"Found {total} videos — showing {visible}")
 
     @staticmethod
     def _format_duration(seconds: int) -> str:
@@ -299,4 +483,6 @@ class BaseBrowserPanel(QWidget):
             )
             self._on_video_found(video)
         if self._videos:
+            self._rebuild_quality_combo()
+            self._apply_filters()
             self.status_label.setText(f"Restored {len(self._videos)} videos")
