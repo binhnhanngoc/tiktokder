@@ -29,7 +29,15 @@ _VIDEO_LINK_RE = re.compile(
 
 
 class FacebookFetcher(QThread):
-    """Scrape video/reel URLs from a Facebook profile page via Playwright."""
+    """Scrape video/reel URLs from a Facebook profile page via Playwright.
+
+    Metadata gap: only ``url`` and a derived ``video_id`` are populated.
+    ``duration``, ``view_count``, and ``upload_date`` stay ``None`` because
+    Playwright DOM scraping yields hrefs only — extracting per-video metadata
+    would require a yt-dlp ``extract_info`` call per link, which is slow and
+    risks tripping login walls. The Library/Browse Date column will show "—"
+    for Facebook entries until a future enrichment pass is added.
+    """
 
     video_found = Signal(object)  # VideoInfo
     error = Signal(str)

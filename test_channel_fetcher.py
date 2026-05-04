@@ -1,10 +1,41 @@
 """Tests for channel_fetcher.py - VideoInfo dataclass and ChannelFetcher logic."""
 
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from channel_fetcher import VideoInfo, ChannelFetcher
+from channel_fetcher import VideoInfo, ChannelFetcher, upload_date_from_entry
+
+
+class TestUploadDateFromEntry:
+    """Convert yt-dlp flat-playlist ``timestamp`` epoch → ``YYYYMMDD``."""
+
+    def test_returns_yyyymmdd_for_valid_epoch(self):
+        ts = 1714867200  # 2024-05-05 UTC
+        expected = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y%m%d")
+        assert upload_date_from_entry({"timestamp": ts}) == expected
+
+    def test_returns_none_for_missing_timestamp(self):
+        assert upload_date_from_entry({}) is None
+
+    def test_returns_none_for_zero(self):
+        assert upload_date_from_entry({"timestamp": 0}) is None
+
+    def test_returns_none_for_negative(self):
+        assert upload_date_from_entry({"timestamp": -1}) is None
+
+    def test_returns_none_for_non_numeric(self):
+        assert upload_date_from_entry({"timestamp": "20240505"}) is None
+
+    def test_returns_none_on_overflow(self):
+        # 1e30 is far beyond datetime's range → fromtimestamp raises.
+        assert upload_date_from_entry({"timestamp": 1e30}) is None
+
+    def test_accepts_float_timestamp(self):
+        ts = 1714867200.5
+        expected = datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y%m%d")
+        assert upload_date_from_entry({"timestamp": ts}) == expected
 
 
 class TestVideoInfo:

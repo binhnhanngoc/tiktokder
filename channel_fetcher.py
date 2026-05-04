@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import yt_dlp
 from yt_dlp.networking.impersonate import ImpersonateTarget
@@ -35,6 +36,23 @@ def quality_from_entry(entry: dict) -> str | None:
     fmt = entry.get("format") or ""
     m = re.search(r"(\d{3,4})p", fmt)
     return f"{m.group(1)}p" if m else None
+
+
+def upload_date_from_entry(entry: dict) -> str | None:
+    """Derive ``YYYYMMDD`` upload date from a flat-playlist entry.
+
+    yt-dlp's flat-playlist mode rarely includes the pre-formatted
+    ``upload_date`` field but usually carries ``timestamp`` (UTC epoch
+    seconds). Convert to UTC date so users in different timezones see the
+    same value yt-dlp would report in non-flat mode.
+    """
+    ts = entry.get("timestamp")
+    if not isinstance(ts, (int, float)) or ts <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y%m%d")
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 class ChannelFetcher(QThread):
@@ -100,7 +118,7 @@ class ChannelFetcher(QThread):
                         title=entry.get("title", "Untitled"),
                         duration=entry.get("duration"),
                         view_count=entry.get("view_count"),
-                        upload_date=entry.get("upload_date"),
+                        upload_date=entry.get("upload_date") or upload_date_from_entry(entry),
                         video_id=video_id,
                         quality=quality_from_entry(entry),
                     )
