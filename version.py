@@ -2,7 +2,7 @@
 
 import re
 
-__version__ = "1.8.0"
+__version__ = "1.9.0"
 
 # SemVer §2: numeric identifiers MUST NOT include leading zeros.
 _match = re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", __version__)

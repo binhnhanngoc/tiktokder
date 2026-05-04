@@ -2,7 +2,7 @@
 
 A Python desktop and CLI tool for batch-downloading videos from TikTok and Facebook without watermarks. Dual interface: PySide6 GUI or CLI with Rich progress UI.
 
-**v1.8.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
+**v1.9.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
 
 ## Features
 
@@ -21,6 +21,7 @@ A Python desktop and CLI tool for batch-downloading videos from TikTok and Faceb
 - **Real-time Progress** — GUI table updates + CLI progress bar with percentages
 - **Rate Limiting** — Configurable inter-request delay to respect platform limits
 - **Watermark Removal** — yt-dlp extraction for clean output
+- **In-App Help** — `Help` menu (or `F1`) opens a tabbed manual: getting started, cookie export/configure walkthroughs, channels & library, troubleshooting, keyboard shortcuts, and about. Non-modal so you can follow steps while your browser is open.
 
 ## Installation
 

@@ -11,11 +11,10 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QDesktopServices, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
-    QMessageBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -34,6 +33,16 @@ from config import (
 from download_engine import DownloadEngine
 from gui.facebook_browser_panel import FacebookBrowserPanel
 from gui.global_url_bar import GlobalUrlBar
+from gui.help_content import (
+    TAB_ABOUT,
+    TAB_CHANNELS_LIBRARY,
+    TAB_COOKIES_CONFIGURE,
+    TAB_COOKIES_EXPORT,
+    TAB_GETTING_STARTED,
+    TAB_SHORTCUTS,
+    TAB_TROUBLESHOOTING,
+)
+from gui.help_dialog import HelpDialog
 from gui.icons import icon
 from gui.library_panel import LibraryPanel
 from gui.platform_tab import PlatformTab
@@ -102,6 +111,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"TikTokDer v{__version__}")
         self.setWindowIcon(_resolve_icon())
         self._restore_geometry()
+        # Help dialog is created lazily on first open so app launch stays cheap.
+        self._help_dialog: HelpDialog | None = None
         self._setup_menu()
 
         # Download engine — shared across all platform tabs.
@@ -519,8 +530,45 @@ class MainWindow(QMainWindow):
         file_menu.addAction(icon("mdi6.export"), "&Export URLs...", self._on_export_urls)
         file_menu.addSeparator()
         file_menu.addAction(icon("mdi6.exit-to-app"), "E&xit", self.close)
+
         help_menu = menu_bar.addMenu("&Help")
-        help_menu.addAction(icon("mdi6.information-outline"), "&About", self._show_about)
+        manual_action = help_menu.addAction(
+            icon("mdi6.book-open-variant"),
+            "User &Manual",
+            lambda: self._open_help(TAB_GETTING_STARTED),
+        )
+        manual_action.setShortcut(QKeySequence("F1"))
+        help_menu.addAction(
+            icon("mdi6.cookie-outline"),
+            "How to &Export Cookies",
+            lambda: self._open_help(TAB_COOKIES_EXPORT),
+        )
+        help_menu.addAction(
+            icon("mdi6.cookie-cog-outline"),
+            "How to &Configure Cookies",
+            lambda: self._open_help(TAB_COOKIES_CONFIGURE),
+        )
+        help_menu.addAction(
+            icon("mdi6.bookmark-multiple-outline"),
+            "&Channels && Library",
+            lambda: self._open_help(TAB_CHANNELS_LIBRARY),
+        )
+        help_menu.addAction(
+            icon("mdi6.lifebuoy"),
+            "&Troubleshooting",
+            lambda: self._open_help(TAB_TROUBLESHOOTING),
+        )
+        help_menu.addAction(
+            icon("mdi6.keyboard-outline"),
+            "&Keyboard Shortcuts",
+            lambda: self._open_help(TAB_SHORTCUTS),
+        )
+        help_menu.addSeparator()
+        help_menu.addAction(
+            icon("mdi6.information-outline"),
+            "&About",
+            lambda: self._open_help(TAB_ABOUT),
+        )
 
     @Slot()
     def _on_import_urls(self) -> None:
@@ -567,16 +615,11 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             self.update_status(f"Export failed: {exc}")
 
-    @Slot()
-    def _show_about(self) -> None:
-        QMessageBox.about(
-            self,
-            "About TikTokDer",
-            f"<h3>TikTokDer v{__version__}</h3>"
-            f"<p>TikTok &amp; Facebook batch video downloader.</p>"
-            f"<p>Download videos without watermarks. Powered by yt-dlp.</p>"
-            f"<p><small>Open source &mdash; see LICENSE.</small></p>",
-        )
+    def _open_help(self, tab_id: str) -> None:
+        """Lazily instantiate HelpDialog and jump to the requested tab."""
+        if self._help_dialog is None:
+            self._help_dialog = HelpDialog(self)
+        self._help_dialog.open_at_tab(tab_id)
 
     # ── geometry / state ──────────────────────────────────────────────────
 

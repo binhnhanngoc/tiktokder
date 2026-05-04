@@ -9,6 +9,20 @@ TikTokDer follows [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 
 The single source of truth is `version.py` (`__version__`). The README badge line and the latest changelog entry below must match it on every release. See `docs/release-process.md` for the bump checklist.
 
+## [1.9.0] — 2026-05-04 — In-app Help dialog
+
+### Added
+- **`Help` menu surfaces a tabbed in-app manual** — entries for User Manual (F1), How to Export Cookies, How to Configure Cookies, Channels & Library, Troubleshooting, Keyboard Shortcuts, About. Each menu entry opens the dialog at the matching tab.
+- **`gui/help_dialog.py` + `gui/help_content.py`** — non-modal `QDialog` with `QTabWidget` of `QTextBrowser` panes; HTML content lives in a separate data module (≈ 200 LOC of pure strings). External `https://` links route through `QDesktopServices` so the dialog never tries to render web pages itself.
+- **Cookie walkthroughs** — explicit step-by-step for the *Get cookies.txt LOCALLY* extension (Chrome / Edge / Firefox), with privacy + expiry notes; configure tab explains the TikTok Cookie-Browser-vs-File precedence and what each unblocks.
+
+### Changed
+- **`MainWindow._setup_menu`** — replaces the single About entry with the seven-item Help menu; About now opens the same dialog on its own tab. The previous `QMessageBox.about` and its `__version__` import in main_window are removed.
+- **`docs/gui-usage.md`** — adds an "In-App Help" section and `F1` to Keyboard Shortcuts.
+
+### Notes
+- 12 new tests in `test_help_dialog.py` (tab definitions, dialog instantiation, `open_at_tab` per id, fallback, non-modal, menu wiring, F1 shortcut). All existing tests pass.
+
 ## [1.8.0] — 2026-05-04 — Channel browse Downloaded filter
 
 ### Added

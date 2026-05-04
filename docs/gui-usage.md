@@ -173,8 +173,23 @@ _Note: Thumbnails are always written as sidecar `.jpg`/`.webp` next to each vide
 - **Failed** → Network/permission error; error message in status column
 - **Cancelled** → User clicked Cancel All or closed app
 
+## In-App Help (v1.9.0)
+
+The **Help** menu opens a tabbed manual with:
+
+- **User Manual** (also `F1`) — getting-started overview
+- **How to Export Cookies** — step-by-step guide for the *Get cookies.txt LOCALLY* extension
+- **How to Configure Cookies** — TikTok vs Facebook cookie settings, when each fixes which problem
+- **Channels & Library** — saving channels, Download all new, library filters
+- **Troubleshooting** — rate limits, login walls, ffmpeg, Force Download, Health pill
+- **Keyboard Shortcuts**
+- **About** — version, dependencies, license
+
+The dialog is **non-modal** — keep it open while exporting cookies in your browser. External links (extensions, ffmpeg, yt-dlp) open in your default browser.
+
 ## Keyboard Shortcuts
 
+- **F1** → Open Help dialog
 - **Ctrl+Q** → Quit
 - **Tab** → Switch between top-level tabs (TikTok / Facebook / Settings)
 - **Enter** (in URL bar) → Submit URL
