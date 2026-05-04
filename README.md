@@ -2,7 +2,7 @@
 
 A Python desktop and CLI tool for batch-downloading videos from TikTok and Facebook without watermarks. Dual interface: PySide6 GUI or CLI with Rich progress UI.
 
-**v1.6.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
+**v1.7.0** | Python 3.10+ | Cross-platform (Windows/macOS/Linux)
 
 ## Features
 
@@ -12,9 +12,10 @@ A Python desktop and CLI tool for batch-downloading videos from TikTok and Faceb
 - **Platform-First UI** — Top-level **TikTok** and **Facebook** tabs, each with Channels (saved list) / Queue / Library sub-tabs; persistent global URL bar auto-routes pasted URLs by platform; status bar shows per-platform queue + done badges
 - **Saved Channels** — Save channels/pages with optional nicknames; right-click for `Download all new` (filters out already-downloaded and pre-cutoff videos)
 - **Library View** — Per-platform 3-pane: uploader sidebar (★ marks saved channels), sortable/filterable history table with a thumbnail column, and a right-side preview pane showing the large thumbnail, metadata, and full description; filter by quality / date range / size / file status; search box matches title, uploader, URL, and description text; right-click rows to open file, open folder, re-download, copy URL, or remove
+- **Channel Browse Filters** — TikTok and Facebook channel browse tables include a search box, Quality dropdown, From/To date range, and sortable headers so large listings can be narrowed before selecting which videos to download. Select All / Download Selected respect the active filter — hidden rows are never queued by accident
 - **Quality Selector** — Default Quality setting (`Best`, `1080p`, `720p`, `480p`, `Audio only`) plus optional subtitle (`en`) downloads (thumbnails are always written as sidecars next to each video so the Library can show previews)
 - **Concurrent Downloads** — ThreadPoolExecutor with configurable workers (default: 3)
-- **Per-uploader Folder Layout** — Output organized as `downloads/{platform}/{uploader}/{id}_{title}.{ext}`
+- **Per-uploader Folder Layout** — Output organized as `downloads/{platform}/{uploader}/{title} [{short_id}].{ext}`. The 6-char ID suffix uniquifies same-title videos; legacy `{id}_{title}.{ext}` files from prior versions remain dedup-recognized.
 - **Drag-and-drop** — Drop URLs or `.txt` files onto the global URL bar or platform tabs to queue downloads
 - **Duplicate Detection** — Recursive filesystem scan; auto-skip already-downloaded videos (works across the new tree and any legacy flat-root files)
 - **Real-time Progress** — GUI table updates + CLI progress bar with percentages
@@ -117,15 +118,15 @@ Videos are saved under the output directory (default: `./downloads/`) using a pl
 downloads/
 ├── tiktok/
 │   ├── @user1/
-│   │   └── 1234567890_video_title.mp4
+│   │   └── video title [aB3xY9].mp4
 │   └── unknown_uploader/
-│       └── 7234567899_orphan.mp4
+│       └── orphan clip [c1d2e3].mp4
 └── facebook/
     └── pagename/
-        └── 12345678_video.mp4
+        └── reel description [f4g5h6].mp4
 ```
 
-Filenames keep the `{video_id}_{title}.ext` shape so legacy flat-root files (from prior versions) remain dedup-recognized.
+Filenames lead with the title and append a 6-char bracketed ID suffix to uniquify same-title videos. Legacy `{video_id}_{title}.ext` files from prior versions remain dedup-recognized via filename regex; new files are dedup-recognized via `history.json`.
 
 ## History
 

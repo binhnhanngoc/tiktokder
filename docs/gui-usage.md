@@ -219,7 +219,7 @@ On app start:
 
 **File Management:**
 - Output directory auto-creates per-uploader subfolders: `downloads/tiktok/@user/` or `downloads/facebook/pagename/`
-- Filenames: `{video_id}_{title}.{ext}` (legacy flat-root files recognized for dedup)
+- Filenames: `{title} [{short_id}].{ext}` (legacy `{video_id}_{title}.{ext}` files from earlier versions remain dedup-recognized)
 - Duplicate detection is filesystem + history based (no re-downloads of known IDs)
 
 **Saved Channels:**

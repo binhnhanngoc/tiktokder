@@ -177,6 +177,10 @@ get_ydl_opts(output_dir: str, quality="best", write_subs=False, write_thumb=True
 download_video(url: str, output_dir: str, progress_hook: Callable | None = None, cookies_file: str | None = None) -> DownloadResult
 download_batch(urls: list[str], output_dir: str, workers: int = 3, delay: float = 1.0, progress_callback: Callable | None = None) -> list[DownloadResult]
 get_downloaded_ids(output_dir: str) -> set[str]
+# Union of two signals: (1) legacy filename regex `^(\d{15,25})_` for files
+# saved before v1.7, (2) HistoryRecord.video_id for new-template files whose
+# file_path is under output_dir and exists on disk. Stale/poisoned records
+# blocked via `_path_under` (realpath + commonpath).
 ```
 
 **Threading Model:**
@@ -322,7 +326,7 @@ save_config(config: AppConfig) -> None
 
 #### Local Filesystem
 - **Video Storage:** `./downloads/` (configurable via UI/CLI)
-- **File Naming:** `{video_id}_{title}.mp4` (platform-aware tree: `/tiktok/{uploader}/` or `/facebook/{pagename}/`)
+- **File Naming:** `{title} [{short_id}].{ext}` (platform-aware tree: `/tiktok/{uploader}/` or `/facebook/{pagename}/`). Title leads, 6-char bracketed ID suffix uniquifies same-title videos. Legacy `{id}_{title}.{ext}` files from prior versions stay dedup-recognized via filename regex; new files via `history.json`.
 - **Facebook Folders (v1.4.0):** Uses page **slug** (URL-safe name) instead of display name for folder hierarchy (e.g., `downloads/facebook/bbc-news/` not `downloads/facebook/BBC News/`)
 - **Thumbnails (v1.4.0):** Sidecar `.jpg`/`.webp` always written next to each video; used by Library preview pane
 - **Duplicate Detection:** Filesystem scan + history dedup check

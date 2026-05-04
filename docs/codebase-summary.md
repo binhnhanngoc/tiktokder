@@ -43,8 +43,9 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 ### v1.2.0 additions
 - `app_state.py` — UI state persistence (Download queue + Channel/Page browse snapshots) in `data/state.json`. Tolerant load.
 - `history_store.py` — schema-v4 history persistence (v1/v2/v3 transparent migration), atomic writes, FIFO cap, plus `update_history_record_fields(path, video_id, **patch)` for atomic single-record updates (used by the in-app player to persist resume position without rewriting the model).
-- `path_builder.py` — pure helpers for slugify + platform/uploader-aware yt-dlp `outtmpl`.
-- `gui/base_browser_panel.py`, `gui/tiktok_browser_panel.py`, `gui/facebook_browser_panel.py` — per-platform sub-panels.
+- `path_builder.py` — pure helpers for slugify + platform/uploader-aware yt-dlp `outtmpl`. Filename shape: `<title>.80s [<id>.6s].<ext>`. Constant `FILENAME_TEMPLATE` is the single source of truth shared with `downloader.get_ydl_opts`.
+- `gui/base_browser_panel.py`, `gui/tiktok_browser_panel.py`, `gui/facebook_browser_panel.py` — per-platform sub-panels with shared filter row (search + Quality + From/To date), sortable headers, and hide-aware Select All / Download Selected.
+- `gui/_table_items.py` — shared `NumericItem` for QTableWidget cells that need to sort by a stored numeric value while displaying a formatted string (used by Library Size column and Browse Duration/Views/Date columns).
 
 ## Module Inventory
 
@@ -67,7 +68,7 @@ TikTokDer is a dual-interface (GUI + CLI) Python application for batch-downloadi
 - `get_ydl_opts(output_dir, cookie_browser=None, quality="best", write_subs=False, write_thumb=True, cookies_file=None) -> dict` — Builds yt-dlp configuration; **v1.4.0: `write_thumb=True` always** (toggle removed); delegates cookie wiring to `yt_dlp_helpers.apply_cookies()` (file precedence over browser)
 - `download_video(url, output_dir, progress_hook=None, cookie_browser=None, cookies_file=None, retries=None, max_attempts=None) -> DownloadResult` — Wraps inner `_do_download` with tenacity outer retry; raises typed exceptions internally, returns `DownloadResult` to callers
 - `download_batch(urls, output_dir, workers=3, delay=1.0, skip_ids=None, delay_std=None, delay_floor=None) -> list[DownloadResult]` — Concurrent downloads with gaussian-jittered, per-platform pacing
-- `get_downloaded_ids(output_dir) -> set[str]` — Scans output for already-downloaded video IDs
+- `get_downloaded_ids(output_dir) -> set[str]` — Returns the union of: (1) IDs parsed from legacy `{id}_{title}.ext` filenames via `LEGACY_ID_RE`, (2) `HistoryRecord.video_id` values whose `file_path` is under `output_dir` and exists on disk. Path traversal blocked via `_path_under` (realpath + commonpath)
 - Internal helpers: `_jittered_sleep`, `_classify_error`, `_kind_to_exception`, `_exception_to_kind`, `_friendly_error`, `_do_download`
 
 **Key Classes:**

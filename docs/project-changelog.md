@@ -9,6 +9,24 @@ TikTokDer follows [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 
 The single source of truth is `version.py` (`__version__`). The README badge line and the latest changelog entry below must match it on every release. See `docs/release-process.md` for the bump checklist.
 
+## [1.7.0] — 2026-05-04 — Channel browse filters + title-leading filenames
+
+### Added
+- **Channel browse filters** — TikTok and Facebook browse sub-panels now have a search box, Quality dropdown, From/To date toggles, and sortable headers. Mirrors the Library filter idiom (200ms debounce, single timer). Select All / Download Selected respect the active filter — hidden rows are never selected or queued.
+- **Date column populated for TikTok** — `channel_fetcher.upload_date_from_entry` converts yt-dlp's flat-playlist `timestamp` (UTC epoch) to `YYYYMMDD` so the Date column is no longer "—" on a typical creator's recent uploads. Facebook stays "—" because the Playwright DOM scrape has no per-video metadata; documented in `FacebookFetcher`.
+- **Shared `gui/_table_items.py::NumericItem`** — extracted from `library_panel.py`; reused by browse panels for numeric-aware Duration / Views / Date sorting.
+
+### Changed
+- **Filename layout — title leads, ID is now a 6-char bracketed suffix.** Old: `{id}_{title}.{ext}`. New: `{title} [{short_id}].{ext}`. Path tree (`downloads/{platform}/{uploader}/`) is unchanged. Legacy files from prior versions stay dedup-recognized (regex `^(\d{15,25})_`); new files are dedup-recognized via `history.json`. The 6-char bracketed ID uniquifies same-title videos so silent overwrites are impossible.
+- **`downloader.get_downloaded_ids` returns the union** of legacy filename regex + history-oracle. Added `_path_under` helper (realpath + commonpath) so a poisoned `history.json` cannot leak phantom IDs from outside `output_dir`.
+
+### Fixed
+- **Live-fetch filter visibility bug** — re-enabling table sorting after each row insert can reorder rows; the predicate now re-applies by current row index instead of a captured pre-sort index, so filters and sort interact correctly during streaming fetch.
+
+### Notes
+- No file on disk is renamed by the layout change. Old downloads keep their `{id}_{title}.{ext}` shape; new downloads use the new shape; both sources count as "already downloaded".
+- 11 new tests (date helper × 7, dedup union × 4, browse filter row × 8 incl. live-fetch+sort regression). 474 total pass repo-wide.
+
 ## [1.6.0] — 2026-05-02 — In-app player
 
 ### Added

@@ -196,9 +196,9 @@ Options:
 
 Output tree now uses Facebook **page slug** (URL-safe name) instead of display name:
 ```
-downloads/facebook/{pagename}/{video_id}_{title}.{ext}
+downloads/facebook/{pagename}/{title} [{short_id}].{ext}
 ```
-Example: `downloads/facebook/bbc-news/12345678_breaking.mp4` (not `downloads/facebook/BBC News/...`)
+Example: `downloads/facebook/bbc-news/breaking story [a1b2c3].mp4` (not `downloads/facebook/BBC News/...`). Legacy `{video_id}_{title}.{ext}` files saved by prior versions remain dedup-recognized.
 
 ## Future Enhancements
 
